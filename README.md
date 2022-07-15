@@ -21,7 +21,7 @@ Installing and Running an Iris node
 7. Test if chainlink compiled correctly with: `chainlink help`
    - Common Issues:
       1. If your shell/terminal doesn't recognize that you downloaded a new package or made a change to a file, make sure to reset your terminal for it to see the change. Alternavily you could use the `source FILE_NAME` command in your terminal on bash/zsh shells.
-8. In your terminal create an enviroment file by entering `nano .env`.
+8. Create an enviroment file called `.env` in the root directory.
 9. Paste this into your new `.env` file:
    ```bash
    ROOT=/chainlink
@@ -34,10 +34,10 @@ Installing and Running an Iris node
    DATABASE_URL=postgresql://$USERNAME:$PASSWORD@$SERVER:$PORT/$DATABASE
    ```
 
-**NOTE**: Special considerations must be made when configuring your node based on what Ethereum chain you're using, the URL to your Ethereum node, URL to your database, etc.
-Detailed instructions can be found here: https://docs.chain.link/docs/running-a-chainlink-node
+   **NOTE**: Special considerations must be made when configuring your node based on what Ethereum chain you're using, the    URL to your Ethereum node, URL to your database, etc.
+   Detailed instructions can be found here: https://docs.chain.link/docs/running-a-chainlink-node
 
-**NOTE**: By default, chainlink will run in TLS mode. 
+   **NOTE**: By default, chainlink will run in TLS mode. 
 10. For local development you can disable this by setting the following env vars:
 
 ```
@@ -45,8 +45,6 @@ CHAINLINK_DEV=true
 CHAINLINK_TLS_PORT=0
 SECURE_COOKIES=false
 ```
-
-   Alternatively, you can generate self signed certificates using `tools/bin/self-signed-certs` or [manually](https://github.com/smartcontractkit/chainlink/wiki/Creating-Self-Signed-Certificates).
 
 11. Start the node with:
 ```bash
