@@ -1,7 +1,9 @@
 # Iris
+=====
 Repository for running Iris nodes based on Chainlink's latest node client software.
 
 ## Installing and Running an Iris node
+-----
 
 ### Build Chainlink
 
