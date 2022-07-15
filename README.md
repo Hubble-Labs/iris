@@ -18,15 +18,11 @@ Installing and Running an Iris node
 6. Build and install Chainlink: `make install`
    - If you got any errors regarding locked yarn package, try running `yarn install` before this step
    - If `yarn install` throws a network connection error, try increasing the network timeout by running `yarn install --network-timeout 150000` before this step
-7. Run the node: `chainlink help`
+7. Test if chainlink compiled correctly with: `chainlink help`
    - Common Issues:
       1. If your shell/terminal doesn't recognize that you downloaded a new package or made a change to a file, make sure to reset your terminal for it to see the change. Alternavily you could use the `source FILE_NAME` command in your terminal on bash/zsh shells.
-
-
-### Configure Chainlink
-
-1. In your terminal create an enviroment file by entering `nano .env`.
-2. Paste this into your new `.env` file:
+8. In your terminal create an enviroment file by entering `nano .env`.
+9. Paste this into your new `.env` file:
    ```bash
    ROOT=/chainlink
    LOG_LEVEL=debug
@@ -41,9 +37,8 @@ Installing and Running an Iris node
 **NOTE**: Special considerations must be made when configuring your node based on what Ethereum chain you're using, the URL to your Ethereum node, URL to your database, etc.
 Detailed instructions can be found here: https://docs.chain.link/docs/running-a-chainlink-node
 
-### Run Chainlink Node
-
-**NOTE**: By default, chainlink will run in TLS mode. For local development you can disable this by setting the following env vars:
+**NOTE**: By default, chainlink will run in TLS mode. 
+10. For local development you can disable this by setting the following env vars:
 
 ```
 CHAINLINK_DEV=true
@@ -51,11 +46,9 @@ CHAINLINK_TLS_PORT=0
 SECURE_COOKIES=false
 ```
 
-Alternatively, you can generate self signed certificates using `tools/bin/self-signed-certs` or [manually](https://github.com/smartcontractkit/chainlink/wiki/Creating-Self-Signed-Certificates).
+   Alternatively, you can generate self signed certificates using `tools/bin/self-signed-certs` or [manually](https://github.com/smartcontractkit/chainlink/wiki/Creating-Self-Signed-Certificates).
 
-
-1. Make sure your Chainlink `.env` file and all other components are configured correctly 
-2. Start the node with:
+11. Start the node with:
 ```bash
 chainlink node start
 ```
