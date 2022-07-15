@@ -15,3 +15,6 @@ Repository for running Iris nodes based on Chainlink's latest node client softwa
    - If you got any errors regarding locked yarn package, try running `yarn install` before this step
    - If `yarn install` throws a network connection error, try increasing the network timeout by running `yarn install --network-timeout 150000` before this step
 7. Run the node: `chainlink help`
+
+### Common Issues:
+1. If your shell/terminal doesn't recognize that you downloaded a new package or made a change to a file, make sure to reset your terminal for it to see the change. Alternavily you could use the `source FILE_NAME` command in your terminal on bash/zsh shells.
