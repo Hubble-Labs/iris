@@ -36,5 +36,12 @@ Repository for running Iris nodes based on Chainlink's latest node client softwa
       ETH_URL=CHANGEME
       DATABASE_URL=postgresql://$USERNAME:$PASSWORD@$SERVER:$PORT/$DATABASE
    `
+
 Special considerations must be made when configuring your node based on what Ethereum chain you're using, the URL to your Ethereum node, URL to your database, etc.
-Detailed instructions can be found here: https://docs.chain.link/docs/running-a-chainlink-node/
+Detailed instructions can be found here: https://docs.chain.link/docs/running-a-chainlink-node
+
+### Run Chainlink Node
+
+1. Make sure your Chainlink `.env` file and all other components are configured correctly 
+2. Start the node with `chainlink node start`.
+3. This will only spin up a de
