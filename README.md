@@ -37,10 +37,24 @@ Repository for running Iris nodes based on Chainlink's latest node client softwa
    DATABASE_URL=postgresql://$USERNAME:$PASSWORD@$SERVER:$PORT/$DATABASE
    ```
 
-NOTE: Special considerations must be made when configuring your node based on what Ethereum chain you're using, the URL to your Ethereum node, URL to your database, etc.
+**NOTE**: Special considerations must be made when configuring your node based on what Ethereum chain you're using, the URL to your Ethereum node, URL to your database, etc.
 Detailed instructions can be found here: https://docs.chain.link/docs/running-a-chainlink-node
 
 ### Run Chainlink Node
 
+**NOTE**: By default, chainlink will run in TLS mode. For local development you can disable this by setting the following env vars:
+
+```
+CHAINLINK_DEV=true
+CHAINLINK_TLS_PORT=0
+SECURE_COOKIES=false
+```
+
+Alternatively, you can generate self signed certificates using `tools/bin/self-signed-certs` or [manually](https://github.com/smartcontractkit/chainlink/wiki/Creating-Self-Signed-Certificates).
+
+
 1. Make sure your Chainlink `.env` file and all other components are configured correctly 
-2. Start the node with `chainlink node start`.
+2. Start the node with:
+```bash
+chainlink node start
+```
