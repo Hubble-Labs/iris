@@ -26,22 +26,21 @@ Repository for running Iris nodes based on Chainlink's latest node client softwa
 
 1. In your terminal create an enviroment file by entering `nano .env`.
 2. Paste this into your new `.env` file:
-   `
-      ROOT=/chainlink
-      LOG_LEVEL=debug
-      ETH_CHAIN_ID=4
-      CHAINLINK_TLS_PORT=0
-      SECURE_COOKIES=false
-      ALLOW_ORIGINS=*
-      ETH_URL=CHANGEME
-      DATABASE_URL=postgresql://$USERNAME:$PASSWORD@$SERVER:$PORT/$DATABASE
-   `
+   ```bash
+   ROOT=/chainlink
+   LOG_LEVEL=debug
+   ETH_CHAIN_ID=4
+   CHAINLINK_TLS_PORT=0
+   SECURE_COOKIES=false
+   ALLOW_ORIGINS=*
+   ETH_URL=CHANGEME
+   DATABASE_URL=postgresql://$USERNAME:$PASSWORD@$SERVER:$PORT/$DATABASE
+   ```
 
-Special considerations must be made when configuring your node based on what Ethereum chain you're using, the URL to your Ethereum node, URL to your database, etc.
+NOTE: Special considerations must be made when configuring your node based on what Ethereum chain you're using, the URL to your Ethereum node, URL to your database, etc.
 Detailed instructions can be found here: https://docs.chain.link/docs/running-a-chainlink-node
 
 ### Run Chainlink Node
 
 1. Make sure your Chainlink `.env` file and all other components are configured correctly 
 2. Start the node with `chainlink node start`.
-3. This will only spin up a de
