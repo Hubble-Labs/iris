@@ -5,7 +5,7 @@ Repository for running Iris nodes based on Chainlink's latest node client softwa
 Installing and Running an Iris node
 -----
 
-### Build Chainlink
+## Build Chainlink
 
 1. [Install Go 1.18](https://golang.org/doc/install), and add your GOPATH's [bin directory to your PATH](https://golang.org/doc/code.html#GOPATH)
    - Example Path for macOS `export PATH=$GOPATH/bin:$PATH` & `export GOPATH=/Users/$USER/go`
