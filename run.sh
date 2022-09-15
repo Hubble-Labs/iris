@@ -2,7 +2,7 @@
 echo "Running script"
 
 # Start server in macOS
-service1="cd /Users/alex/Iris/chainlink && ./chainlink node start"
+service1="cd /Users/alex/Iris/chainlink && ./chainlink node start -p .password -a .api"
 service2="cd /Users/alex/Iris/iris-external-adapter && conda activate sift && python app.py"
 
 osascript -e "tell application \"Terminal\" to do script \"${service1}\""
