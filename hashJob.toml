@@ -1,0 +1,29 @@
+type = "directrequest"
+schemaVersion = 1
+evmChainID = 1
+name = "image_hash"
+contractAddress = "0x50E6531dD12147c17d7F02005f31b4747F64FfFD"
+
+# Optional fields:
+# requesters        = [
+#   "0xaaaa1F8ee20f5565510B84f9353F1E333E753B7a",
+#   "0xbbbb70F0e81C6F3430dfdC9fa02fB22BdD818C4e"
+# ]
+# minContractPaymentLinkJuels = "100000000000000"
+# externalJobID = "0EEC7E1D-D0D2-476C-A1A8-72DFB6633F02"
+# minIncomingConfirmations = 10
+
+observationSource   = """
+    ds              [type="bridge" name="hash_bridge" ]
+    hash            [type="jsonparse" path="hash"]
+    encode_data     [type="ethabiencode" abi="(uint256 value)" data="{ \\"value\\": $(hash) }"]
+    encode_tx       
+                    [
+                        type="ethabiencode"
+                        abi="fulfillOracleRequest(bytes32 requestId, uint256 payment, address callbackAddress, bytes4 callbackFunctionId, uint256 expiration, bytes32 data)"
+                        data="{\\"requestId\\": $(decode_log.requestId), \\"payment\\": $(decode_log.payment), \\"callbackAddress\\": $(decode_log.callbackAddr), \\"callbackFunctionId\\": $(decode_log.callbackFunctionId), \\"expiration\\": $(decode_log.cancelExpiration), \\"data\\": $(encode_data)}"
+                    ]
+    submit_tx       [type="ethtx" to="0x50E6531dD12147c17d7F02005f31b4747F64FfFD" data="$(encode_tx)"]
+  
+    ds -> hash -> encode_data -> encode_tx -> submit_tx
+"""

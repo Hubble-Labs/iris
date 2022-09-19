@@ -5,6 +5,14 @@ Repository for running Iris nodes based on Chainlink's latest node client softwa
 Installing and Running an Iris node
 -----
 
+```
+git clone --recurse-submodules -j8 https://github.com/Hubble-Labs/iris.git
+cd iris
+python3 -m venv env
+source env/bin/activate
+pip install -r requirements.txt
+```
+
 ## Build Chainlink
 
 1. [Install Go 1.18](https://golang.org/doc/install), and add your GOPATH's [bin directory to your PATH](https://golang.org/doc/code.html#GOPATH)
