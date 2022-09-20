@@ -3,12 +3,14 @@ pragma solidity ^0.8.7;
 
 import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
+import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
+import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
 
-
-contract VRFv2Consumer is VRFConsumerBaseV2 {
+contract VRFv2Consumer is VRFConsumerBaseV2, ChainlinkClient, ConfirmedOwner {
+  using Chainlink for Chainlink.Request;
   VRFCoordinatorV2Interface COORDINATOR;
 
-    event FulfilledVar(uint256 requestId, uint256 value, address leader);
+    event FulfilledImage(uint256 requestId, uint256 value, address leader);
   // Your subscription ID.
   uint64 s_subscriptionId;
 
@@ -48,10 +50,12 @@ contract VRFv2Consumer is VRFConsumerBaseV2 {
   address s_oracleB;
   address s_oracleC;
 
+  uint256 private constant ORACLE_PAYMENT = 1 * LINK_DIVISIBILITY;
 
 
-  constructor(uint64 subscriptionId, address vrfCoordinator, bytes32 keyHash, address oracleA, address oracleB, address oracleC) VRFConsumerBaseV2(vrfCoordinator) {
+  constructor(uint64 subscriptionId, address vrfCoordinator, bytes32 keyHash, address oracleA, address oracleB, address oracleC) VRFConsumerBaseV2(vrfCoordinator) ConfirmedOwner(msg.sender){
     COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
+    setChainlinkToken(0x326C977E6efc84E512bB9C30f76E30c160eD06FB);
     s_owner = msg.sender;
     s_subscriptionId = subscriptionId;
     s_keyHash = keyHash;
@@ -69,7 +73,7 @@ contract VRFv2Consumer is VRFConsumerBaseV2 {
         callbackGasLimit,
         numWords
     );
-    
+
   }
 
     function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords) internal override {
@@ -80,19 +84,33 @@ contract VRFv2Consumer is VRFConsumerBaseV2 {
             leader_node = s_oracleB;
         } else {
             leader_node = s_oracleC;
-        fulfillVar(requestId, s_randomWords);
+        fulfillImage(requestId, s_randomWords);
     }
 }
 
-    function fulfillVar(uint256 requestId, uint256 randomWord) private {
-        // execution path A
-        emit FulfilledVar(requestId, randomWord, leader_node);
+    function fulfillImage(uint256 requestId, uint256 randomWord) public recordChainlinkFulfillment(bytes32(requestId)) {
+        // execution path
+        emit FulfilledImage(requestId, randomWord, leader_node);
     }
 
+    function requestImage(address _oracle, string memory _jobId) public onlyOwner {
+        Chainlink.Request memory req = buildChainlinkRequest(
+            stringToBytes32(_jobId),
+            address(this),
+            this.fulfillImage.selector
+        );
+        sendChainlinkRequestTo(_oracle, req, ORACLE_PAYMENT);
+    }
 
-  modifier onlyOwner() {
-    require(msg.sender == s_owner);
-    _;
-  }
+    function stringToBytes32(string memory source) private pure returns (bytes32 result) {
+        bytes memory tempEmptyStringTest = bytes(source);
+        if (tempEmptyStringTest.length == 0) {
+            return 0x0;
+        }
+
+        assembly {
+            // solhint-disable-line no-inline-assembly
+            result := mload(add(source, 32))
+        }
+    }
 }
-
