@@ -1,6 +1,3 @@
 [submodule "iris-external-adapter"]
 	path = iris-external-adapter
 	url = https://github.com/Hubble-Labs/iris-external-adapter
-[submodule "chainlink"]
-	path = chainlink
-	url = https://github.com/Hubble-Labs/chainlink.git
