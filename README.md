@@ -10,7 +10,7 @@ git clone --recurse-submodules -j8 https://github.com/Hubble-Labs/iris.git
 cd iris
 python3 -m venv env
 source env/bin/activate
-pip install -r requirements.txt
+pip install -r req.txt
 ```
 
 ## Setup Chainlink
