@@ -1,0 +1,9 @@
+__pycache__/
+package/
+*.zip
+/env
+test1.jpg
+.env
+.DS_Store
+io_example/
+/data
