@@ -7,7 +7,7 @@ Installing and Running an Iris node
 
 ```
 git clone --recurse-submodules -j8 https://github.com/Hubble-Labs/iris.git
-cd iris
+cd iris/external-adapter
 python3 -m venv env
 source env/bin/activate
 pip install -r req.txt
