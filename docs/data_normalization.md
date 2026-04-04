@@ -149,7 +149,9 @@ Before the satellite takes a picture we should be modeling the reality of the si
 #### Phase 2: Raw Image Capture (The 3D-to-2D Sensor Model)
 The sensors discretize the continuous 3D reality into 2D matrices. The integration occurs over the warped surface area of the terrain, not a flat plane. 
 
-Let $dA$ be the surface area element on S, defined as $dA= \sqrt{1+(∇h)^2}dxdy$.
+Let $dA$ be the surface area element on S, defined as:
+
+$$dA= \sqrt{1+(∇h)^2}dxdy$$
 
 - Hardware Specifications: Sat. A captures $a$ bands/images of size $n \times m$ and Sat. B captures $b$ bands/images of size $p \times q$ such that: 
     - $a, b \in \mathbb{Z}^+$
@@ -157,13 +159,13 @@ Let $dA$ be the surface area element on S, defined as $dA= \sqrt{1+(∇h)^2}dxdy
 - Sensor Footprints: 
     - Let $S^A_{i,j}$ and $S^B_{i,j}$ be the specific physical surface patches on S intersected by the instantaneous field of view (IFOV) of the $i$-th pixel of the $j$-th band for Sat. A and Sat. B respectively. 
 - Spectral Response: 
-    - Let $R^(k)_A(\lambda)$ and $R^(k)_B(\lambda)$ be the spectral response functions for the k-th band of Sat. A and Sat. B respectively. 
+    - Let $R^{(k)}_A(\lambda)$ and $R^{(k)}_B(\lambda)$ be the spectral response functions for the k-th band of Sat. A and Sat. B respectively. 
 
 The raw capture tensors, $\bar{A}_{raw} \in \mathbb{R}^{a \times n \times m}$ and $\bar{B}_{raw} \in \mathbb{R}^{b \times p \times q}$ are defined element-wise for band $k$ and pixel $(i, j)$ as:
 
-- $A^{(k,i,j)}_{raw} = P_A(\int_\Lambda(\int\int_{S^A_{i,j}} L(x, y, h(x, y), \lambda) \cdot dA) \cdot R^(k)_A(\lambda) \cdot d\lambda) + \mathcal{N}_A$
+$$A^{(k,i,j)}_{raw} = P_A(\int_\Lambda(\int\int_{S^A_{i,j}} L(x, y, h(x, y), \lambda) \cdot dA) \cdot R^{(k)}_A(\lambda) \cdot d\lambda) + \mathcal{N}_A$$
 
-- $B^{(k,i,j)}_{raw} = P_B(\int_\Lambda(\int\int_{S^B_{i,j}} L(x, y, h(x, y), \lambda) \cdot dB) \cdot R^(k)_B(\lambda) \cdot d\lambda) + \mathcal{N}_B$
+$$B^{(k,i,j)}_{raw} = P_B(\int_\Lambda(\int\int_{S^B_{i,j}} L(x, y, h(x, y), \lambda) \cdot dB) \cdot R^{(k)}_B(\lambda) \cdot d\lambda) + \mathcal{N}_B$$
 
 (Where $P$ is the signal-dependent Poisson shot noise, and $\mathcal{N}$ is the Gaussian read noise).
 
@@ -179,8 +181,8 @@ To compare the disparate raw matrices they must be projected intoa shared coordi
 
 The final aligned tensors ready for analysis are:
 
-- $\bar{A} = \mathcal{T}_A(\bar{A}_{raw}) + \mathcal{E_A}$
-- $\bar{B} = \mathcal{T}_B(\bar{B}_{raw}) + \mathcal{E_B}$
+$$\bar{A} = \mathcal{T}_A(\bar{A}_{raw}) + \mathcal{E_A}$$
+$$\bar{B} = \mathcal{T}_B(\bar{B}_{raw}) + \mathcal{E_B}$$
 
 Where both $\bar{A}, \bar{B} \in \mathbb{R}^{a \times N \times M}$. (This is assuming that $b = a$ now).
 
@@ -190,16 +192,36 @@ With perfectly dimensionsed and aligned tesnsors we evaluate similarity and dete
 
 1. **The Difference Tensor ($\Delta$):**
     - An $a \times N \times M$ tensor that represents the absolute difference between the two tensors. Used to visually or algorithmically locate where anomalies or alignment failures exist.
-    - $\Delta = \bar{A} - \bar{B}$
+    
+    $$\Delta = \bar{A} - \bar{B}$$
 
-2. **The Frobenius Norm ($\mathcal{F}$):**
-    - A scalar value that represents the magnitude of the difference between the two tensors. Used to determine if the difference is significant enough to be considered an anomaly.
-    - $\mathcal{F} = \sqrt{\sum_{i=1}^{a}\sum_{j=1}^{N}\sum_{k=1}^{M}(\bar{A}^{(i,j,k)} - \bar{B}^{(i,j,k)})^2}$
-
-3. **Mean Squared Error (MSE):**
+2. **Mean Squared Error (MSE):**
     - A scalar value that represents the average squared difference between the two tensors. Used to determine if the difference is significant enough to be considered an anomaly.
-    - $MSE = \frac{1}{aNM}\sum_{i=1}^{a}\sum_{j=1}^{N}\sum_{k=1}^{M}(\bar{A}^{(i,j,k)} - \bar{B}^{(i,j,k)})^2$
+    
+    $$MSE = \frac{1}{aNM}\sum_{i=1}^{a}\sum_{j=1}^{N}\sum_{k=1}^{M}(\bar{A}^{(i,j,k)} - \bar{B}^{(i,j,k)})^2$$
 
-4. **Spectral Angle Mapper (SAM):**
-    - A scalar value that represents the angle between the two tensors. Used to determine if the difference is significant enough to be considered an anomaly.
-    - $SAM = \frac{1}{aNM}\sum_{i=1}^{a}\sum_{j=1}^{N}\sum_{k=1}^{M}(\bar{A}^{(i,j,k)} - \bar{B}^{(i,j,k)})^2$
+3. **Spectral Angle Mapper (SAM):**
+    - An $N \times M$ matrix isolating changes in physical material (spectral signature) while ignoring changes in illumination or shadow intensity. For the a-dimensional spectral vectors $v^{(i,j)}_A$ and $v^{(i,j)}_B$ at each pixel $(i,j)$ 
+    
+    $$SAM_{(i,j)}(\bar{A}, \bar{B}) = \arccos(\frac{v^{(i,j)}_A \cdot v^{(i,j)}_B}{||v^{(i,j)}_A||_2 ||v^{(i,j)}_B||_2})$$
+
+**Phase 5: Similarity Index**
+
+Our feature vector is now strictly:
+
+$$\mu = [\mu_1, \mu_2, \mu_3]^T$$
+
+representing three independent, normalized properties of the difference between the aligned tensors $\bar{A}$ and $\bar{B}$.
+
+1. **$\mu_1$ (Mean Absolute Distance)**: The spatial mean of the Difference Tensor $\Delta$.
+This acts as a linear penalty for total absolute deviation.
+
+$$\mu_1 = \frac{1}{aNM}\sum_{i=1}^{a}\sum_{j=1}^{N}\sum_{k=1}^{M}|\bar{A}^{(i,j,k)} - \bar{B}^{(i,j,k)}|$$
+
+2. 
+
+3.
+
+
+
+
