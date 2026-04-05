@@ -200,6 +200,8 @@ With perfectly dimensionsed and aligned tesnsors we evaluate similarity and dete
     
     $$MSE = \frac{1}{aNM}\sum_{i=1}^{a}\sum_{j=1}^{N}\sum_{k=1}^{M}(\bar{A}^{(i,j,k)} - \bar{B}^{(i,j,k)})^2$$
 
+    - Note: This would be where I would also include the Frobenius Norm but since it is proportional to MSE it is redundant. It also doesn't help us much since the Frobenius Norm scales infinitely with the dimensions of the images ($N$ and $M$). That means that a score for an image of 100x100 would be 100x smaller than an image of 1000x1000, even if the relative difference between the two images was the same. MSE is normalized by the number of pixels making the score independent of the image dimensions.
+
 3. **Spectral Angle Mapper (SAM):**
     - An $N \times M$ matrix isolating changes in physical material (spectral signature) while ignoring changes in illumination or shadow intensity. For the a-dimensional spectral vectors $v^{(i,j)}_A$ and $v^{(i,j)}_B$ at each pixel $(i,j)$ 
     
@@ -211,16 +213,32 @@ Our feature vector is now strictly:
 
 $$\mu = [\mu_1, \mu_2, \mu_3]^T$$
 
-representing three independent, normalized properties of the difference between the aligned tensors $\bar{A}$ and $\bar{B}$.
+Here $\mu$ is a vector of three independent, normalized properties of the difference between the aligned tensors $\bar{A}$ and $\bar{B}$ with:
+
+- $\mu_1 = $ the *Mean Absolute Distance* between $\bar{A}$ and $\bar{B}$.
+- $\mu_2 = $ the *Mean Squared Error* between $\bar{A}$ and $\bar{B}$.
+- $\mu_3 = $ the *Mean Spectral Angle Mapper* between $\bar{A}$ and $\bar{B}$.
 
 1. **$\mu_1$ (Mean Absolute Distance)**: The spatial mean of the Difference Tensor $\Delta$.
 This acts as a linear penalty for total absolute deviation.
 
 $$\mu_1 = \frac{1}{aNM}\sum_{i=1}^{a}\sum_{j=1}^{N}\sum_{k=1}^{M}|\bar{A}^{(i,j,k)} - \bar{B}^{(i,j,k)}|$$
 
-2. 
+2. **$\mu_2$ (Mean Squared Error)**: The statistical variance. This acts as a quadratic penalty, meaning it heavily punishes a few pixels with extreme noise/error, while being forgiving of tiny, uniform noise.
 
-3.
+$$\mu_2 = \frac{1}{aNM}\sum_{i=1}^{a}\sum_{j=1}^{N}\sum_{k=1}^{M}(\bar{A}^{(i,j,k)} - \bar{B}^{(i,j,k)})^2$$
+
+3. **$\mu_3$ (Spectral Angle Mapper)**: The spatial mean of the SAM matrix. This metric is strictly blind to intensity, penalizing only changes in the physical material (spectral signature).
+
+$$\mu_3 = \frac{1}{N \dot M} \sum{SAM(\bar(A), \bar(B))}$$
+
+Final scoring function
+
+Using the physics based exponetial decay model, we define a tuning vector $\beta = [\beta_1, \beta_2, \beta_3]^T \in \mathcal{R}^3$. These $\beta$ values dictate how aggressively a specific type of error destroys the simularity score.
+
+The Similarity Score $\mathcal{S}$ is defined as:
+
+$$\mathcal{S}(\mu) = 100 \cdot e^{-\beta \cdot \mu} = 100 \cdot e^{-(\beta_1 \mu_1 + \beta_2 \mu_2 + \beta_3 \mu_3)}$$
 
 
 
