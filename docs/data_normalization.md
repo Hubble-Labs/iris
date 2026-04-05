@@ -1,6 +1,6 @@
-Part of the things we'll need to be aware of are the degrees of freedom for the system/satellite data. 
+From a math and physics point of view, it only makes sense to compare things that are supposed to be the same. However there are factors that incorporate discrepancies between the data. It can be from differences in orbit, from the camera sensors that are used and so on. Therefore we'll need to be aware of the degrees of freedom for the system/satellite data. 
 
-For individual satellites it can b:
+For individual satellites it can be:
 1. 6-Directional Position
     - This would be the position of the satellite in 3D space and its orientation in 3D space. This should actually be changed to orbital parameters *(Semi-major axis, Eccentricity, Inclination, Right ascension of the ascending node, Argument of periapsis, True anomaly)* instead of cardinal directions *(Up, Down, Left, Right, Forward, Backward)*. Either way its equivalent to 6-degrees of freedom and a change in coordinate system is needed to compare them.
 1. 3-Degress of Rotation
