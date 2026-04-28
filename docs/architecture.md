@@ -34,7 +34,7 @@ These metrics are combined into a final **Similarity Score** using a physics-bas
 ## 5. Consensus Engine (Iris-BFT)
 The Iris-BFT consensus operates over specific rounds to finalize an image request:
 1. **Leader Election**: A Leader node is pseudo-randomly selected for a given request.
-2. **Observation**: Nodes gossip their fetched imagery, accompanied by their TLS proofs.
+2. **Observation**: Nodes gossip a lightweight manifest containing their Image Hash, Bounding Box, and TLS proofs over GossipSub. Full GeoTIFFs are requested directly via libp2p streams.
 3. **Aggregation**: The Leader node utilizes the Data Normalization Engine to find the "Average Scenario"—the image mathematically most similar to the consensus pool, acting as the most accurate representation of the Area of Interest.
 4. **Storage**: The finalized Average Scenario image is pinned to decentralized storage (IPFS/Filecoin) to acquire a Content Identifier (CID).
 5. **Threshold Signature**: The committee verifies the Leader's aggregation and IPFS pin. If valid, they provide partial signatures. The Leader aggregates these into a single BLS threshold signature (or Schnorr multi-sig) representing a hyper-majority agreement.
@@ -43,4 +43,5 @@ The Iris-BFT consensus operates over specific rounds to finalize an image reques
 While the heavy computation (fetching, TLS proof generation, tensor comparisons) happens off-chain, the final results must be verifiable on-chain for dapps to consume.
 * **Iris Verifier Contract**: Deployed on target host chains (e.g., Ethereum, Polygon), this contract is seeded with the network's aggregate public key.
 * **State Updates**: The contract accepts the final report (containing the IPFS CID and relevant metadata) and the threshold signature. If the signature is cryptographically valid, the contract updates the on-chain state, making the verified GIS data available to ecosystem dapps.
+* **Tokenomics (Staking & Slashing)**: Node operators are required to stake IRIS tokens to participate in the network. Dapps pay request fees, which reward honest nodes. Nodes providing malicious or anomalous data have their stakes slashed, ensuring cryptoeconomic security.
 * **Data Distillation**: External networks (like Chainlink DONs) can also query the Iris API Gateway to ingest this highly-trusted GIS data and further distill it into simpler, numerical actionable data for smart contracts.

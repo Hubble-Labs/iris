@@ -15,9 +15,9 @@ To remove external dependencies, Iris uses **libp2p** as its foundational networ
 Iris implements a custom Byzantine Fault Tolerant (BFT) Off-Chain Reporting consensus designed specifically for rich data types like images.
 1.  **Selection**: A Leader node is pseudo-randomly selected for a specific round based on an incoming data request.
 2.  **Observation & Data Provenance**: Regular nodes fetch the requested GIS data from constellation APIs (Maxar, Planet, Sentinel, etc.). To prevent man-in-the-middle attacks and ensure the imagery is genuine, nodes must utilize TLS proof protocols (e.g., DECO, TLSNotary) to generate cryptographic proofs of the API payload. These proofs act as signatures verifying that the specific imagery came directly from the authenticated constellation endpoint without tampering.
-3.  **Processing (Deterministic Hashing & ORB)**: Nodes process the imagery using computationally cheap and deterministic algorithms (e.g., ORB - Oriented FAST and Rotated BRIEF, or perceptual hashing) and locally compute similarity via Hamming distance to determine data provenance.
-4.  **Reporting**: Nodes gossip their observations, TLS proofs, and signed image hashes over the P2P network.
-5.  **Aggregation**: The Leader node compiles the "Average Scenario" (the image mathematically most similar to the consensus pool, acting as the most accurate representation of the Area of Interest).
+3.  **Processing (Tensor Normalization)**: Nodes process the imagery by orthorectifying the data to a shared DEM (Digital Elevation Model) and then natively in Rust compute similarity across three tensor metrics: Mean Absolute Distance, Mean Squared Error, and Spectral Angle Mapper.
+4.  **Reporting**: Nodes gossip a lightweight manifest containing their observations (TLS proofs, signed image hashes, bounding boxes) over the P2P network. Full GeoTIFFs are exchanged via direct streams to avoid GossipSub congestion.
+5.  **Aggregation**: The Leader node aggregates the tensors to compute the "Average Scenario" (the image mathematically most similar to the consensus pool based on the combined physics-based exponential decay similarity score).
 6.  **Threshold Signatures**: Nodes verify the Leader's aggregate report. If the computation is valid, they provide partial signatures. The Leader combines these into a single BLS threshold signature (or Schnorr multi-sig) indicating a hyper-majority agreement (> 2/3 of the committee).
 
 ### 2.3. Distributed Storage
@@ -39,7 +39,7 @@ Designed future-proof for cross-compatibility and broader decentralized particip
 1.  **Request Initiation**: A dApp Smart Contract on a host chain emits a `DataRequest` event for satellite imagery (e.g., for Crop Insurance claim verification).
 2.  **Ingestion**: Iris nodes monitor the chain, detect the event, and initiate a new Iris-BFT consensus round.
 3.  **Fetching**: Nodes independently pull imagery from external satellite APIs for the requested coordinates and time bounds, concurrently generating TLS proofs of the API payload origin.
-4.  **Consensus**: Nodes use deterministic algorithms like ORB or perceptual hashing to assert image similarities and compute the Average Scenario.
+4.  **Consensus**: Nodes use physics-based tensor comparison algorithms (Mean Absolute Distance, MSE, Spectral Angle Mapper) implemented natively in Rust to mathematically compute the Average Scenario.
 5.  **Storage**: The elected node pins the validated image to IPFS.
 6.  **Signature**: The committee provides BFT threshold signatures over the CID, the accompanied TLS data-provenance proofs, and requested metadata.
 7.  **Finalize**: A relayer submits the signed deterministic report to the `Iris Verifier Contract` on the host chain.
