@@ -1,5 +1,3 @@
-- [ ] Migrate existing docs to this repo
-
 Research:
 - [ ] Investigate current state of oracle networks
     - [ ] Current state of the chainlink projects
@@ -10,5 +8,6 @@ Research:
 - [ ] Investigate current state of satellite imagery data formats
 - [ ] Investigate current 
 
-
+Completed
+- [x] Migrate existing docs to this repo
 
