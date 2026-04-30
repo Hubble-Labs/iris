@@ -82,6 +82,37 @@ The geodesic model clarifies several architectural decisions:
 
 The Iris state machine operates at **four nested layers**, each tracking different aspects of the system. Understanding these layers is essential to understanding what the node software is actually doing at any given moment.
 
+```mermaid
+flowchart TD
+    subgraph L4 [" "]
+        C["<b>Layer 4: Committee State (Network Lifecycle)</b><br/><br/>Tracks: Active Nodes, DKG, Aggregate PubKey"]:::content
+        
+        subgraph L3 [" "]
+            P["<b>Layer 3: Panel State (Global Persistent State)</b><br/><br/>Tracks: Finalized IPFS CIDs, On-chain Reports"]:::content
+            
+            subgraph L2 [" "]
+                N["<b>Layer 2: Node State (Local Persistent State)</b><br/><br/>Tracks: Local Cache, Keys, Active Rounds Map"]:::content
+                
+                subgraph L1 [" "]
+                    R["<b>Layer 1: Round State (Per-Request)</b><br/><br/>Tracks: FSM Phases (Observing → Voting → Commit)"]:::content
+                end
+            end
+        end
+    end
+
+    classDef content fill:#fff,stroke:#666,stroke-width:1px,color:#000;
+    
+    classDef l4 fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px;
+    classDef l3 fill:#fff3e0,stroke:#ff9800,stroke-width:2px;
+    classDef l2 fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
+    classDef l1 fill:#e3f2fd,stroke:#2196f3,stroke-width:2px;
+
+    class L4 l4;
+    class L3 l3;
+    class L2 l2;
+    class L1 l1;
+```
+
 ### 3.1 Layer 1 — Round State (per-request lifecycle)
 
 The innermost and most active layer. Every incoming `DataRequest` event from a host blockchain spawns a new **Round**. A round is the atomic unit of work in Iris: it begins with a request and ends with either a finalized panel (success) or a timeout (failure).
@@ -92,10 +123,10 @@ The round progresses through a strict finite state machine:
 stateDiagram-v2
     [*] --> Idle
     Idle --> Observing : Request received
-    Observing --> Aggregating : Manifests collected\n(Leader only)
-    Aggregating --> PreCommit : Proposal broadcast\n(Leader pins to IPFS)
-    PreCommit --> Voting : Nodes verify &\nbroadcast BLS shares
-    Voting --> Commit : Threshold signatures\naggregated (t > 2n/3)
+    Observing --> Aggregating : Manifests collected<br/>(Leader only)
+    Aggregating --> PreCommit : Proposal broadcast<br/>(Leader pins to IPFS)
+    PreCommit --> Voting : Nodes verify &<br/>broadcast BLS shares
+    Voting --> Commit : Threshold signatures<br/>aggregated (t > 2n/3)
     Commit --> [*] : Report delivered on-chain
     Voting --> [*] : Timeout / insufficient signatures
 ```
@@ -153,7 +184,7 @@ This layer persists across rounds. It represents the node's long-lived identity 
 | **Identity** | `ed25519` keypair, derived `PeerId`, BLS private key share | Node first boot (keypair generated) or DKG ceremony (BLS share issued) |
 | **Committee Membership** | List of known committee members, their `PeerId`s, stake weights, BLS public key shares, and the aggregate public key | DKG ceremony completes after a committee change |
 | **Provider Credentials** | API keys/tokens for **Data Providers** (Maxar, Planet, Sentinel) | Configured by operator in `iris.toml` |
-| **Local Cache** | Content-addressed store of fetched GeoTIFFs (`~/.iris/cache/<sha256>.tiff`) and TLS proofs (`~/.iris/proofs/<hash>.tlsn`) | After every successful fetch |
+| **Local Cache** | Content-addressed store of fetched GeoTIFFs (`~/.iris/cache/<blake2b>.tiff`) and TLS proofs (`~/.iris/proofs/<hash>.tlsn`) | After every successful fetch |
 | **Active Rounds** | Map of `RequestId → Round` for all in-progress rounds. A node may participate in multiple concurrent rounds | New request arrives / round finalizes |
 | **Peer Table** | Kademlia routing table + GossipSub mesh peers | Continuously, via libp2p discovery |
 
@@ -168,7 +199,7 @@ struct Panel {
     timestamp:        DateTime<Utc>,    // When the imagery was captured
 
     // The reconstruction
-    image_hash:       ImageHash,        // SHA-256 of the finalized image
+    image_hash:       ImageHash,        // BLAKE2b hash of the finalized image
 
     // Provenance chain
     tls_proofs:       Vec<TlsProofRef>, // References to the TLS proofs of contributing nodes
@@ -213,8 +244,8 @@ The committee is the set of staked, authorized nodes that participate in consens
 stateDiagram-v2
     [*] --> PendingJoin : Node stakes IRIS tokens
     PendingJoin --> DKGInProgress : Governance approves
-    DKGInProgress --> ActiveCommittee : DKG succeeds\n(new shares dealt)
-    DKGInProgress --> PendingJoin : DKG fails\n(retry)
+    DKGInProgress --> ActiveCommittee : DKG succeeds<br/>(new shares dealt)
+    DKGInProgress --> PendingJoin : DKG fails<br/>(retry)
     ActiveCommittee --> SlashedExited : Slash or unstake
     SlashedExited --> [*]
 
@@ -380,20 +411,20 @@ flowchart TD
     Root(("Root<br/>(Bit 0)"))
     
     %% First split (Bucket 1)
-    Root -- "Bit differs\n(Opposite Half)" --> B1["Bucket 1\n(Furthest Peers)\n[Max 20 Peers]"]
-    Root -- "Bit matches\n(Same Half)" --> N1(("Bit 1"))
+    Root -- "Bit differs<br/>(Opposite Half)" --> B1["Bucket 1<br/>(Furthest Peers)<br/>[Max 20 Peers]"]
+    Root -- "Bit matches<br/>(Same Half)" --> N1(("Bit 1"))
     
     %% Second split (Bucket 2)
-    N1 -- "Bit differs\n(Opposite Quarter)" --> B2["Bucket 2\n[Max 20 Peers]"]
-    N1 -- "Bit matches\n(Same Quarter)" --> N2(("Bit 2"))
+    N1 -- "Bit differs<br/>(Opposite Quarter)" --> B2["Bucket 2<br/>[Max 20 Peers]"]
+    N1 -- "Bit matches<br/>(Same Quarter)" --> N2(("Bit 2"))
     
     %% Third split (Bucket 3)
-    N2 -- "Bit differs\n(Opposite Eighth)" --> B3["Bucket 3\n[Max 20 Peers]"]
-    N2 -- "Bit matches\n(Same Eighth)" --> N3(("..."))
+    N2 -- "Bit differs<br/>(Opposite Eighth)" --> B3["Bucket 3<br/>[Max 20 Peers]"]
+    N2 -- "Bit matches<br/>(Same Eighth)" --> N3(("..."))
     
     %% Last split (Bucket 256)
-    N3 -- "Last bit differs\n(Next-door neighbor)" --> B256["Bucket 256\n(Closest Peers)\n[Max 20 Peers]"]
-    N3 -- "Last bit matches" --> Local["🟢 Local Node\n(Distance: 0)"]
+    N3 -- "Last bit differs<br/>(Next-door neighbor)" --> B256["Bucket 256<br/>(Closest Peers)<br/>[Max 20 Peers]"]
+    N3 -- "Last bit matches" --> Local["🟢 Local Node<br/>(Distance: 0)"]
     
     classDef bucket fill:#f9f6ff,stroke:#8a2be2,stroke-width:2px;
     classDef localNode fill:#d4edda,stroke:#28a745,stroke-width:3px;
@@ -415,7 +446,7 @@ Iris defines three GossipSub topics, each carrying a specific message type at a 
 | `iris/observations/v1` | `Manifest` | ~500 bytes | All **Regular Nodes** | **Leader Node** | `Observing` |
 | `iris/consensus/v1` | `Proposal` / `BLSShare` / `Rejection` | ~300–800 bytes | **Leader Node** (Proposal) / **Regular Nodes** (BLSShare) | All nodes | `PreCommit → Voting → Commit` |
 
-> **Critical design decision:** Full GeoTIFF payloads (10–50 MB each) are **never** published to GossipSub. Gossiping a 50 MB file to a 20-node mesh would produce ~1 GB of total network traffic per observation per node. Instead, only lightweight manifests (~500 bytes) are gossiped. The **Leader Node** retrieves full payloads via direct streams (Section 4.5) only when needed.
+> **Critical design decision:** Full GeoTIFF payloads (500 MB – 16 GB each) are **never** published to GossipSub. Gossiping a 1 GB file to a 20-node mesh would produce ~20 GB of total network traffic per observation per node. Instead, only lightweight manifests (~500 bytes) are gossiped. The **Leader Node** retrieves full payloads via direct streams (Section 4.5) only when needed.
 
 #### Mesh Topology
 
@@ -461,10 +492,10 @@ GossipSub is designed for small, fan-out messages. Satellite imagery is neither 
 |-------|-------|
 | Protocol ID | `/iris/geotiff/1.0.0` |
 | Transport | libp2p `RequestResponse` behaviour over the existing Yamux-multiplexed connection |
-| Request payload | `GeotiffRequest { image_hash: ImageHash }` — the SHA-256 hash of the desired GeoTIFF, as advertised in the sender's manifest |
+| Request payload | `GeotiffRequest { image_hash: ImageHash }` — the BLAKE2b hash of the desired GeoTIFF, as advertised in the sender's manifest |
 | Response payload | `GeotiffResponse { data: Vec<u8> }` — the raw GeoTIFF bytes, streamed in chunks |
-| Timeout | 60 seconds |
-| Max payload size | 100 MB |
+| Timeout | 3600 seconds |
+| Max payload size | 16 GB |
 
 #### Transfer Flow
 
@@ -481,11 +512,11 @@ sequenceDiagram
     Leader->>NodeB: GeotiffRequest { image_hash: 0xdef... }
     Leader->>NodeC: GeotiffRequest { image_hash: 0x123... }
 
-    NodeA-->>Leader: GeotiffResponse { data: [50 MB GeoTIFF] }
-    NodeB-->>Leader: GeotiffResponse { data: [45 MB GeoTIFF] }
-    NodeC-->>Leader: GeotiffResponse { data: [48 MB GeoTIFF] }
+    NodeA-->>Leader: GeotiffResponse { data: [1.2 GB GeoTIFF] }
+    NodeB-->>Leader: GeotiffResponse { data: [1.1 GB GeoTIFF] }
+    NodeC-->>Leader: GeotiffResponse { data: [1.3 GB GeoTIFF] }
 
-    Note over Leader: Verify SHA-256(data) == image_hash
+    Note over Leader: Verify BLAKE2b(data) == image_hash
     Note over Leader: All payloads received, run normalization pipeline
 ```
 
@@ -495,9 +526,9 @@ The **Leader Node** opens parallel direct streams to all contributing nodes simu
 
 Upon receiving a GeoTIFF payload, the **Leader Node**:
 
-1. Computes `SHA-256(payload)` and verifies it matches the `image_hash` from the sender's manifest.
+1. Computes `BLAKE2b(payload)` and verifies it matches the `image_hash` from the sender's manifest.
 2. Checks that the manifest's `tls_proof_hash` references a valid, verifiable TLS proof (either cached locally or fetched from the sender via a separate request).
-3. Parses the GeoTIFF into the `ndarray`-based tensor representation and stores it in the local cache (`~/.iris/cache/<sha256>.tiff`).
+3. Parses the GeoTIFF into the `ndarray`-based tensor representation and stores it in the local cache (`~/.iris/cache/<blake2b>.tiff`).
 
 If any verification step fails, the payload is discarded and the contributing node's peer score is penalized.
 
@@ -527,7 +558,7 @@ sequenceDiagram
     Note over Leader: Aggregating: need full GeoTIFFs
 
     Leader->>Nodes: Direct stream: GeotiffRequest per manifest
-    Nodes-->>Leader: Direct stream: GeotiffResponse (10-50 MB each)
+    Nodes-->>Leader: Direct stream: GeotiffResponse (500 MB - 16 GB each)
 
     Note over Leader: Run normalization pipeline, select Average Scenario, pin to IPFS
 
@@ -548,7 +579,7 @@ sequenceDiagram
 Notice the two distinct bandwidth regimes:
 
 * **GossipSub traffic** (lightweight, fan-out): `DataRequest` (~200 B) → `Manifest` (~500 B × n) → `Proposal` (~800 B) → `BLSShare` (~300 B × n). For a 20-node committee, total GossipSub traffic per round is under **50 KB**.
-* **Direct stream traffic** (heavy, point-to-point): The **Leader Node** pulls ~50 MB × n GeoTIFFs. For a 20-node committee, this is ~**1 GB** — but it flows only to the **Leader Node**, not to every peer. During PreCommit verification, **Regular Nodes** may also pull the proposed GeoTIFF (~50 MB each) via direct stream from the **Leader Node**.
+* **Direct stream traffic** (heavy, point-to-point): The **Leader Node** pulls ~1 GB × n GeoTIFFs. For a 20-node committee, this is ~**20 GB** — but it flows only to the **Leader Node**, not to every peer. During PreCommit verification, **Regular Nodes** may also pull the proposed GeoTIFF (~1 GB each) via direct stream from the **Leader Node**.
 
 This two-tier design keeps the GossipSub mesh fast and lightweight while allowing the **Leader Node** to handle bulk data transfer via dedicated point-to-point channels.
 
@@ -618,8 +649,8 @@ k_bucket_size = 20
 bootstrap_interval_seconds = 30
 
 [network.transfer]
-geotiff_timeout_seconds = 60
-max_payload_bytes = 104_857_600  # 100 MB
+geotiff_timeout_seconds = 3600
+max_payload_bytes = 17_179_869_184  # 16 GB
 max_concurrent_transfers = 10
 ```
 
@@ -785,3 +816,108 @@ To tie everything together, here is a single request traced through all four sta
 8. The **Leader Node** collects 5 shares, aggregates them, and transitions to `Commit`.
 9. The Relayer submits the report on-chain. The **Panel** (Layer 3) is now finalized — one more facet of the geodesic sphere.
 10. **Committee State** is unchanged (no nodes joined or left this round). The round is cleaned up from each node's **Node State**.
+
+```mermaid
+flowchart TD
+    subgraph External ["External Entities"]
+        direction LR
+        Req(("Requester<br/>(Dapp)"))
+        Chain{{"Host Blockchain<br/>(Smart Contract)"}}
+        API[/"Commercial APIs<br/>(Maxar/Planet)"/]
+    end
+
+    subgraph L4 ["Layer 4: Committee State"]
+        DKG[("Active Set & PubKey<br/>(Maintains t > 2n/3)")]
+    end
+
+    subgraph L2 ["Layer 2: Node State"]
+        direction LR
+        PeerID["Cryptographic Identity<br/>(ed25519 & BLS Keys)"]
+        Cache[("Local Storage Cache<br/>(GeoTIFFs & TLS Proofs)")]
+    end
+
+    subgraph L1 ["Layer 1: Round State (Per-Request FSM)"]
+        direction LR
+        FSM_Obs["Observing<br/>(Fetch & Manifest)"] --> FSM_Agg["Aggregating<br/>(Leader Computes Avg)"]
+        FSM_Agg --> FSM_Pre["Pre-Commit<br/>(Proposal)"]
+        FSM_Pre --> FSM_Vote["Voting<br/>(Verify & Sign)"]
+        FSM_Vote --> FSM_Com["Commit<br/>(Aggregate Sig)"]
+    end
+
+    subgraph L3 ["Layer 3: Panel State"]
+        FinalPanel[/"Finalized Panel<br/>(IPFS CID + Metadata)"/]
+    end
+
+    %% Relationships
+    Req -- "1. Emits Request" --> Chain
+    Chain -- "2. Relayed to Network" --> FSM_Obs
+    
+    L2 -. "3. Spawns Round" .-> L1
+    PeerID -. "Signs Manifests & Shares" .-> L1
+    DKG -. "Defines Threshold 't'" .-> FSM_Vote
+    
+    FSM_Obs -- "4. Downloads Imagery" --> API
+    API -- "Raw Data + TLS Proof" --> Cache
+    Cache -- "Loads Tensor" --> FSM_Agg
+    
+    FSM_Agg -- "5. Pins to IPFS" --> FinalPanel
+    FSM_Com -- "6. Seals with BLS Sig" --> FinalPanel
+    
+    FinalPanel -- "7. deliverReport()" --> Chain
+    Chain -- "8. onIrisDataReceived()" --> Req
+
+    classDef ext fill:#eceff1,stroke:#607d8b,stroke-width:2px,color:#000;
+    classDef l4 fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px,color:#000;
+    classDef l2 fill:#e8f5e9,stroke:#4caf50,stroke-width:2px,color:#000;
+    classDef l1 fill:#e3f2fd,stroke:#2196f3,stroke-width:2px,color:#000;
+    classDef l3 fill:#fff3e0,stroke:#ff9800,stroke-width:2px,color:#000;
+
+    class External,Req,Chain,API ext;
+    class L4,DKG l4;
+    class L2,PeerID,Cache l2;
+    class L1,FSM_Obs,FSM_Agg,FSM_Pre,FSM_Vote,FSM_Com l1;
+    class L3,FinalPanel l3;
+```
+
+---
+
+## 10. System Complexity and Compute Requirements
+
+Given the strict demands of the Iris Protocol to ingest and process satellite imagery at a nation-state resistant level, nodes require high-end prosumer hardware. Below are the estimated complexity and resource requirements for a single consensus round.
+
+### 10.1 Cryptographic Compute (Hashing)
+The Iris Protocol natively uses **BLAKE2b** as its core hashing algorithm. When processing payloads up to 16 GB, cryptographic speed and nation-state resistance are equally critical. BLAKE2b was chosen over SHA-256 and SHA-512 because it provides 512-bit post-quantum security (unlike SHA-256's 128-bit quantum resistance), while significantly outperforming both SHA-512 and SHA-3 on 64-bit hardware. It also provides a higher security margin (more rounds) than BLAKE3.
+*   **Throughput:** A modern CPU core can hash data with BLAKE2b at roughly 800 MB/s to 1 GB/s.
+*   **Average Payload (1 GB):** Hashing a 1 GB GeoTIFF takes approximately **1 to 1.5 seconds**.
+*   **Maximum Payload (16 GB):** Hashing a 16 GB file takes roughly **16 to 24 seconds**.
+*   **Leader Verification:** If the Leader receives 20 payloads of 1 GB each (20 GB total), hashing can be executed in parallel via `tokio` streams, completing the cryptographic verification well within the bounds of a single consensus phase. Hashing is **not** the network bottleneck.
+
+### 10.2 Bandwidth & Network Throughput
+Network transfer is the primary time-constraining factor due to the large payload sizes:
+*   **Regular Nodes:** Each node must download 1 GB to 16 GB from the commercial API and eventually serve this data to the Leader Node.
+*   **Leader Node (The Bottleneck):** A Leader in a 20-node committee must stream 20 GB to 320 GB of incoming data over libp2p. On a 1 Gigabit connection (~125 MB/s), downloading 20 GB takes roughly **3 minutes** under ideal conditions. A 16 GB max payload scenario (320 GB total) would necessitate prolonged timeout windows (`geotiff_timeout_seconds = 3600`).
+*   **Bandwidth Cost:** To support this, nodes should be provisioned in environments without strict bandwidth caps, utilizing fiber or dedicated 1-10 Gbps uplinks.
+
+### 10.3 Memory (RAM) Requirements
+The Data Normalization Engine must hold multiple large tensors in memory to calculate pairwise similarity scores:
+*   **Tensor Expansion:** A 1 GB highly-compressed GeoTIFF expands significantly when loaded into raw `f32` or `f64` multi-dimensional arrays (tensors).
+*   **RAM Capacity:** A Leader Node analyzing 20 payloads simultaneously will require substantial memory overhead. A minimum of **32 GB to 64 GB of RAM** is recommended for average workloads, with **128 GB+** advised if processing payloads near the 16 GB maximum.
+
+### 10.4 Normalization Pipeline (CPU/GPU Compute)
+The mathematical processing (Orthorectification, Mean Absolute Distance, Spectral Angle Mapper) is highly parallelizable:
+*   **Compute Density:** Comparing millions of pixel vectors across 20 distinct images involves massive matrix operations.
+*   **Hardware Target:** The use of Rust's `ndarray` and parallel iterators (`rayon`) allows the system to utilize all available CPU cores. Alternatively, nodes configured with prosumer GPUs (e.g., RTX 3090/4090 or equivalent) can drastically reduce the required time to compute the similarity matrix $\mathcal{S}(\mu)$ from minutes to seconds by executing tensor operations natively on the GPU hardware.
+
+---
+
+## 11. End-to-End Fault Tolerance
+
+The Iris Protocol is designed as a defense-in-depth pipeline. Because the system bridges off-chain commercial satellite imagery with on-chain smart contracts, a single type of fault tolerance is insufficient. Instead, the architecture combines multiple layers of tolerance to create an unbroken Chain of Provenance:
+
+1. **Cryptographic Fault Tolerance (Data Ingestion)**: Using TLSNotary (MPC), the protocol guarantees the origin of the data, mathematically preventing nodes from spoofing or altering the raw API payloads.
+2. **Deterministic Verification Tolerance (Data Normalization)**: By enforcing a 100% deterministic Rust pipeline, the network tolerates malicious preprocessing. Any attempt to alter the data during orthorectification is caught by independent Verifiers.
+3. **Sybil & Impersonation Tolerance (Network Layer)**: The Noise Protocol and `ed25519`-bound PeerIDs prevent node impersonation, while GossipSub v1.1 peer scoring drops malicious or spamming nodes, thwarting Eclipse and Sybil attacks.
+4. **Byzantine & Collusion Tolerance (Consensus)**: The Iris-BFT engine ensures the network can agree on a valid reconstruction as long as $f < n/3$ nodes are malicious. The BLS threshold signature acts as a cryptographic lock, making it impossible for a minority of nodes to forge a finalized consensus report.
+5. **Rational Fault Tolerance (Smart Contracts)**: The staking and slashing tokenomics assume nodes are economically rational, heavily penalizing any malicious deviations and aligning financial incentives with data integrity.
+
+By forcing an attacker to simultaneously break MPC cryptography, deterministic pipelines, threshold signatures, and economic incentives, the Iris Protocol achieves a robust end-to-end Byzantine and Cryptographic tolerance for geospatial data.
