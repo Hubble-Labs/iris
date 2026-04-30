@@ -1,14 +1,52 @@
 # Iris Protocol Architecture
 
-This document defines the architecture of the Iris Protocol, a proprietary, standalone Decentralized Terrestrial Satellite Oracle Network (DtsON). Iris enables decentralized applications (dapps) to reliably ingest, verify, and utilize Geographical Information System (GIS) data, such as satellite imagery.
+This document defines the architecture of the Iris Protocol, a proprietary, standalone Decentralized Terrestrial Satellite Oracle Network (DtsON). Iris enables **Requesters** (decentralized applications or dapps) to reliably ingest, verify, and utilize Geographical Information System (GIS) data, such as satellite imagery.
 
 ---
 
-## 1. System Overview
+## 1. System Overview: The Chain of Provenance
 
-Iris operates as an independent decentralized network specifically optimized for rich data types like imagery. Unlike early oracle models that relied solely on singular numerical values or basic off-chain reporting, Iris employs a custom Byzantine Fault Tolerant consensus mechanism (**Iris-BFT**) to securely reach agreement on the provenance and similarity of satellite imagery.
+The core design philosophy of the Iris Protocol is the **Chain of Provenance**. Unlike early oracle models that relied on trusting node operators to report data truthfully, Iris is architected to guarantee that the rich geospatial data it ingests remains mathematically provable and completely untampered with throughout the entirety of its journey—from the commercial satellite provider to the blockchain smart contract.
 
-The network fetches imagery off-chain, proves the authenticity of the data source without trusting the node, mathematically calculates the "Average Scenario" using tensor comparison algorithms, and reports the verified data back to a host blockchain via threshold signatures.
+Every jump in the data's lifecycle is secured by a specific cryptographic protocol, creating an unbroken chain of trust. By strictly enforcing this provenance pipeline, Iris operates as a highly secure, Byzantine Fault Tolerant (BFT) consensus network that removes the need to trust the physical nodes themselves.
+
+### 1.1 The Provenance Pipeline
+
+```mermaid
+flowchart LR
+    Provider["Data Provider<br/>(Maxar, Planet)"] 
+    Node["Regular Node<br/>(Prover)"]
+    Leader["Leader Node<br/>(Aggregator)"]
+    IPFS[("Decentralized<br/>Storage")]
+    Contract{"Smart Contract<br/>(Blockchain)"}
+    Requester(("Requester<br/>(Dapp)"))
+
+    Provider -- "TLSNotary (MPC)<br/>Cryptographic Proof" --> Node
+    Node -- "Noise Protocol<br/>(ed25519 Encryption)" --> Leader
+    Leader -- "CID Hashing<br/>(Content Addressing)" --> IPFS
+    Leader -- "BLS Threshold Signature<br/>(Committee Seal)" --> Contract
+    IPFS -. "Fetch Panel Data" .-> Requester
+    Contract -. "Verify CID & Signature" .-> Requester
+
+    classDef external fill:#ffe0b2,stroke:#ff9800,stroke-width:2px;
+    classDef iris fill:#e3f2fd,stroke:#2196f3,stroke-width:2px;
+    classDef storage fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
+    classDef onchain fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px;
+
+    class Provider external;
+    class Node,Leader iris;
+    class IPFS storage;
+    class Contract,Requester onchain;
+```
+
+### 1.2 System Actors
+
+Entities in the Iris network participate in one or more of the following roles:
+
+* **Regular Node**: An active committee member that fetches imagery from **Data Providers**, generates TLS provenance proofs, verifies leader proposals, and provides BLS signature shares during consensus.
+* **Leader Node**: A committee member deterministically elected for a specific round to collect manifests, retrieve full imagery payloads via secure Noise streams, run the normalization pipeline, propose the Average Scenario, and aggregate BLS signatures.
+* **Data Provider**: External commercial satellite imagery providers (e.g., Maxar, Planet Labs, Sentinel) that supply the raw geospatial data via HTTPS APIs.
+* **Requester**: Decentralized applications (dapps) or smart contracts on a host blockchain that request satellite data and consume the finalized, verifiable panels.
 
 ---
 
@@ -20,14 +58,14 @@ Before diving into subsystems it helps to have a mental model for *what the stat
 
 Imagine the Earth as a geodesic sphere — not a smooth continuous surface, but a polyhedron assembled from many discrete **flat panels** (like a Buckminster Fuller dome projected around the entire globe). Each panel covers a bounded patch of the planet's surface — an **Area of Interest (AoI)** — defined by a bounding box and a point in time.
 
-When a dapp requests satellite data for a specific location, the Iris network is essentially being asked to **reconstruct one panel** of this sphere. The reconstruction pipeline works as follows:
+When a **Requester** requests satellite data for a specific location, the Iris network is essentially being asked to **reconstruct one panel** of this sphere. The reconstruction pipeline works as follows:
 
-1. **Multiple nodes independently photograph the same panel** by fetching satellite imagery from different constellations (Maxar, Planet, Sentinel). Each photograph is a slightly different perspective of the same physical surface — different viewing angles, different spectral sensitivities, different times of day.
+1. **Multiple Regular Nodes independently photograph the same panel** by fetching satellite imagery from different **Data Providers** (Maxar, Planet, Sentinel). Each photograph is a slightly different perspective of the same physical surface — different viewing angles, different spectral sensitivities, different times of day.
 2. **The Data Normalization Engine aligns all photographs** into a shared coordinate space via orthorectification, then computes pairwise Similarity Scores ($\mathcal{S}$) to measure how close each photograph is to every other.
 3. **The Average Scenario is selected** — the single photograph that is mathematically most similar to the consensus pool. This image becomes the panel's canonical reconstruction: the best available estimate of what that patch of Earth actually looks like.
 4. **The panel is finalized** when the committee threshold-signs the reconstruction's IPFS CID and delivers it on-chain.
 
-Over time, as dapps request data for different locations and timestamps, the network accumulates a growing mosaic of verified panels — an ever-expanding geodesic reconstruction of the Earth's surface, each facet independently verified by decentralized consensus.
+Over time, as **Requesters** request data for different locations and timestamps, the network accumulates a growing mosaic of verified panels — an ever-expanding geodesic reconstruction of the Earth's surface, each facet independently verified by decentralized consensus.
 
 ### 2.2 Why This Analogy Matters
 
@@ -35,7 +73,7 @@ The geodesic model clarifies several architectural decisions:
 
 * **Panels are discrete and bounded.** The state machine does not attempt to reconstruct the entire Earth at once. Each consensus round produces exactly one panel for one AoI at one timestamp. This keeps round complexity constant regardless of network scale.
 * **Panels are independently verifiable.** Each panel carries its own CID, its own BLS threshold signature, and its own set of TLS provenance proofs. A consumer can verify a single panel without trusting the rest of the mosaic.
-* **Resolution is demand-driven.** The geodesic sphere has no fixed tessellation. Panels are created where dapps request them. A heavily-monitored agricultural region might have hundreds of tightly-packed panels; an open ocean might have none. The "resolution" of the reconstruction is driven entirely by on-chain demand.
+* **Resolution is demand-driven.** The geodesic sphere has no fixed tessellation. Panels are created where **Requesters** request them. A heavily-monitored agricultural region might have hundreds of tightly-packed panels; an open ocean might have none. The "resolution" of the reconstruction is driven entirely by on-chain demand.
 * **Temporal layering.** The same AoI can have multiple panels at different timestamps, creating a temporal stack — a time-series of verified reconstructions for the same location.
 
 ---
@@ -66,12 +104,12 @@ stateDiagram-v2
 
 | State | Who is active | What is being tracked | Exit condition |
 |-------|--------------|----------------------|----------------|
-| **Idle** | All nodes | Subscription to `iris/requests/v1`. The node is listening for the next `DataRequest` event from the blockchain relayer or GossipSub. | A valid `DataRequest` is received and the node determines the Leader for this round via the election algorithm. |
-| **Observing** | All regular nodes | Each node independently: (1) fetches imagery from its assigned satellite provider, (2) generates a TLS provenance proof via TLSNotary, (3) parses the GeoTIFF into a tensor, (4) constructs a lightweight `Manifest` containing `{image_hash, bounding_box, timestamp, tls_proof_hash, node_signature}`, and (5) publishes the manifest to `iris/observations/v1`. The node tracks: which providers it queried, the local file path of the cached GeoTIFF, the `.tlsn` proof path, and its own manifest. | The node has published its manifest AND the observation window timer expires (e.g., 30 seconds). |
-| **Aggregating** | Leader node only | The Leader collects all manifests from `iris/observations/v1`. For each manifest, the Leader requests the full GeoTIFF payload via a direct libp2p stream (the Bitswap-like transfer protocol). Once all payloads are retrieved, the Leader runs the full normalization pipeline: orthorectification → similarity metrics ($\mu_1$, $\mu_2$, $\mu_3$) → exponential decay scoring $\mathcal{S}(\mu)$ → pairwise similarity matrix → Average Scenario selection. The Leader tracks: the similarity matrix, the selected Average Scenario tensor, and its corresponding image hash. | The Leader has computed the Average Scenario and pinned it to IPFS, obtaining a CID. |
-| **Pre-Commit** | Leader broadcasts, all nodes listen | The Leader publishes a `Proposal` message to `iris/consensus/v1` containing: `{request_id, selected_image_hash, ipfs_cid, similarity_matrix_summary, leader_signature}`. Each regular node independently verifies the proposal by: (1) checking the TLS proof for the selected image, (2) fetching the proposed GeoTIFF via libp2p stream, (3) re-running the tensor normalization pipeline locally to confirm the similarity scores, and (4) verifying the IPFS CID matches. The node tracks: verification result (accept/reject), its own partial BLS signature (if accepted). | Each node has either broadcast a BLS signature share to `iris/consensus/v1` (accept) or broadcast a rejection (reject). |
-| **Voting** | Leader collects | The Leader collects BLS signature shares from `iris/consensus/v1`. It tracks: which nodes have responded, the count of accepts vs. rejects, the partial signatures received. | The Leader has collected $t$ valid signature shares (where $t > 2n/3$), OR the voting timer expires. |
-| **Commit** | Leader finalizes | The Leader aggregates $t$ partial BLS signatures into a single 48-byte threshold signature. The Relayer module submits the final report `{request_id, ipfs_cid, aggregated_bls_signature}` to the `IrisVerifier` smart contract on the host blockchain. The round is now finalized. The node tracks: the finalized CID, the aggregated signature, the transaction hash of the on-chain delivery. | The on-chain transaction is confirmed, OR the round is marked as failed (insufficient signatures / timeout). |
+| **Idle** | All nodes | Subscription to `iris/requests/v1`. The node is listening for the next `DataRequest` event from the blockchain relayer or GossipSub. | A valid `DataRequest` is received and the node determines the **Leader Node** for this round via the election algorithm. |
+| **Observing** | All **Regular Nodes** | Each node independently: (1) fetches imagery from its assigned **Data Provider**, (2) generates a TLS provenance proof via TLSNotary, (3) parses the GeoTIFF into a tensor, (4) constructs a lightweight `Manifest` containing `{image_hash, bounding_box, timestamp, tls_proof_hash, node_signature}`, and (5) publishes the manifest to `iris/observations/v1`. The node tracks: which providers it queried, the local file path of the cached GeoTIFF, the `.tlsn` proof path, and its own manifest. | The node has published its manifest AND the observation window timer expires (e.g., 30 seconds). |
+| **Aggregating** | **Leader Node** only | The **Leader Node** collects all manifests from `iris/observations/v1`. For each manifest, the **Leader Node** requests the full GeoTIFF payload via a direct libp2p stream (the Bitswap-like transfer protocol). Once all payloads are retrieved, the **Leader Node** runs the full normalization pipeline: orthorectification → similarity metrics ($\mu_1$, $\mu_2$, $\mu_3$) → exponential decay scoring $\mathcal{S}(\mu)$ → pairwise similarity matrix → Average Scenario selection. The **Leader Node** tracks: the similarity matrix, the selected Average Scenario tensor, and its corresponding image hash. | The **Leader Node** has computed the Average Scenario and pinned it to IPFS, obtaining a CID. |
+| **Pre-Commit** | **Leader Node** broadcasts, all **Regular Nodes** listen | The **Leader Node** publishes a `Proposal` message to `iris/consensus/v1` containing: `{request_id, selected_image_hash, ipfs_cid, similarity_matrix_summary, leader_signature}`. Each **Regular Node** independently verifies the proposal by: (1) checking the TLS proof for the selected image, (2) fetching the proposed GeoTIFF via libp2p stream, (3) re-running the tensor normalization pipeline locally to confirm the similarity scores, and (4) verifying the IPFS CID matches. The node tracks: verification result (accept/reject), its own partial BLS signature (if accepted). | Each node has either broadcast a BLS signature share to `iris/consensus/v1` (accept) or broadcast a rejection (reject). |
+| **Voting** | **Leader Node** collects | The **Leader Node** collects BLS signature shares from `iris/consensus/v1`. It tracks: which nodes have responded, the count of accepts vs. rejects, the partial signatures received. | The **Leader Node** has collected $t$ valid signature shares (where $t > 2n/3$), OR the voting timer expires. |
+| **Commit** | **Leader Node** finalizes | The **Leader Node** aggregates $t$ partial BLS signatures into a single 48-byte threshold signature. The Relayer module submits the final report `{request_id, ipfs_cid, aggregated_bls_signature}` to the `IrisVerifier` smart contract on the host blockchain. The round is now finalized. The node tracks: the finalized CID, the aggregated signature, the transaction hash of the on-chain delivery. | The on-chain transaction is confirmed, OR the round is marked as failed (insufficient signatures / timeout). |
 
 #### Round State Data Structure (Conceptual)
 
@@ -114,23 +152,22 @@ This layer persists across rounds. It represents the node's long-lived identity 
 |------------|----------------|-------------|
 | **Identity** | `ed25519` keypair, derived `PeerId`, BLS private key share | Node first boot (keypair generated) or DKG ceremony (BLS share issued) |
 | **Committee Membership** | List of known committee members, their `PeerId`s, stake weights, BLS public key shares, and the aggregate public key | DKG ceremony completes after a committee change |
-| **Provider Credentials** | API keys/tokens for satellite providers (Maxar, Planet, Sentinel) | Configured by operator in `iris.toml` |
+| **Provider Credentials** | API keys/tokens for **Data Providers** (Maxar, Planet, Sentinel) | Configured by operator in `iris.toml` |
 | **Local Cache** | Content-addressed store of fetched GeoTIFFs (`~/.iris/cache/<sha256>.tiff`) and TLS proofs (`~/.iris/proofs/<hash>.tlsn`) | After every successful fetch |
 | **Active Rounds** | Map of `RequestId → Round` for all in-progress rounds. A node may participate in multiple concurrent rounds | New request arrives / round finalizes |
 | **Peer Table** | Kademlia routing table + GossipSub mesh peers | Continuously, via libp2p discovery |
 
 ### 3.3 Layer 3 — Panel State (the reconstruction output)
 
-Each finalized round produces a **Panel** — one facet of the geodesic reconstruction. The panel is the primary output artifact of the Iris network and what dapps ultimately consume.
+Each finalized round produces a **Panel** — one facet of the geodesic reconstruction. The Panel is the primary logical output of the Iris network. 
 
 ```rust
 struct Panel {
     // What patch of Earth does this panel represent?
-    bounding_box:     BoundingBox,     // Geographic coordinates (lat/lon corners)
+    bounding_box:     BoundingBox,      // Geographic coordinates (lat/lon corners)
     timestamp:        DateTime<Utc>,    // When the imagery was captured
 
     // The reconstruction
-    ipfs_cid:         String,           // Content Identifier for the Average Scenario GeoTIFF
     image_hash:       ImageHash,        // SHA-256 of the finalized image
 
     // Provenance chain
@@ -144,9 +181,18 @@ struct Panel {
 
     // On-chain anchor
     request_id:       RequestId,        // Links back to the originating smart contract event
-    chain_tx_hash:    Option<TxHash>,   // The on-chain transaction that delivered this panel
 }
 ```
+
+#### Final Payload & Decentralized Storage
+While the `Panel` struct exists logically in the memory of the nodes during consensus, the final, long-term payload delivered to **Requesters** is packaged differently to ensure permanent accessibility. 
+
+Once the "Average Scenario" is finalized, the **Leader Node**:
+1. Serializes the entire `Panel` data structure into a standardized **`.json` metadata file**.
+2. Wraps both the `.json` metadata file and the finalized `.tiff` GeoTIFF image into a single IPFS directory.
+3. Pins this directory to IPFS.
+
+The resulting **IPFS CID** now points to the complete package: the visual reconstruction (GeoTIFF) and the mathematically verified history of how it was made (JSON Metadata). The committee signs this root CID, and the Relayer submits it to the smart contract. Dapps can then fetch the IPFS folder to instantly retrieve both the imagery and the trustless provenance data.
 
 Panels are immutable once committed. If the same AoI is requested again at a later time, a new panel is created — it does not overwrite the old one. This creates the **temporal layering** described in the geodesic model.
 
@@ -188,38 +234,37 @@ Iris is built on its own peer-to-peer (P2P) networking stack to remove dependenc
 
 ### 4.1 Protocol Stack
 
-The Iris network stack is built entirely on `rust-libp2p` and composes several protocol behaviours into a single multiplexed connection between any two peers. The layering looks like this:
+Iris is built entirely on `rust-libp2p` and composes several protocol behaviours into a single multiplexed connection between any two peers. The layering looks like this:
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Application Layer                     │
-│  ┌─────────────┐ ┌──────────────┐ ┌──────────────────┐  │
-│  │  GossipSub   │ │   Kademlia   │ │ RequestResponse  │  │
-│  │  (pub/sub)   │ │    (DHT)     │ │ (/iris/geotiff)  │  │
-│  └──────┬───────┘ └──────┬───────┘ └────────┬─────────┘  │
-│         │                │                  │            │
-│  ┌──────┴────────────────┴──────────────────┴─────────┐  │
-│  │              Identify Protocol                     │  │
-│  │   (exchange PeerId, agent string, listen addrs)    │  │
-│  └────────────────────────┬───────────────────────────┘  │
-├────────────────────────────┼────────────────────────────┤
-│                  Multiplexing Layer                     │
-│  ┌────────────────────────┴───────────────────────────┐  │
-│  │                    Yamux                            │  │
-│  │   (multiple logical streams over one connection)   │  │
-│  └────────────────────────┬───────────────────────────┘  │
-├────────────────────────────┼────────────────────────────┤
-│                   Security Layer                        │
-│  ┌────────────────────────┴───────────────────────────┐  │
-│  │               Noise Protocol (XX)                  │  │
-│  │   (mutual authentication + encryption via ed25519) │  │
-│  └────────────────────────┬───────────────────────────┘  │
-├────────────────────────────┼────────────────────────────┤
-│                  Transport Layer                        │
-│  ┌────────────────────────┴───────────────────────────┐  │
-│  │               TCP/IP + DNS Resolution              │  │
-│  └────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph ApplicationLayer ["Application Layer - Virtual Streams"]
+        direction LR
+        sub1["GossipSub<br/>(pub/sub)"]
+        sub2["Kademlia<br/>(DHT)"]
+        sub3["RequestResponse<br/>(/iris/geotiff)"]
+        Identify["Identify Protocol<br/>(exchange PeerId)"]
+    end
+
+    subgraph MultiplexingLayer ["Multiplexing Layer"]
+        Yamux["Yamux Multiplexer<br/>(combines logical streams)"]
+    end
+
+    subgraph SecurityLayer ["Security Layer"]
+        Noise["Noise Protocol (XX)<br/>(mutual authentication + encryption)"]
+    end
+
+    subgraph TransportLayer ["Transport Layer"]
+        TCP["TCP/IP Socket"]
+    end
+
+    sub1 --> Yamux
+    sub2 --> Yamux
+    sub3 --> Yamux
+    Identify --> Yamux
+    
+    Yamux --> Noise
+    Noise --> TCP
 ```
 
 Every connection between two Iris nodes traverses this entire stack. A single TCP connection is upgraded through Noise, multiplexed through Yamux, and then hosts multiple concurrent protocol streams — a Kademlia lookup, a GossipSub mesh link, and a GeoTIFF transfer can all share the same underlying socket.
@@ -233,15 +278,64 @@ Every connection between two Iris nodes traverses this entire stack. A single TC
 | **Encryption** | Noise Protocol Framework (XX handshake) | Every connection is encrypted and mutually authenticated. During the handshake, both peers prove possession of their `ed25519` private keys. The resulting Noise session provides forward-secure symmetric encryption for all data on the wire |
 | **Identity** | ed25519 keypairs → `PeerId` | A node's `PeerId` is the multihash of its ed25519 public key. This creates a one-to-one binding between network identity and cryptographic identity — there is no way to impersonate a `PeerId` without holding the corresponding private key |
 
-#### Why This Matters for Iris
+#### 4.2.1 Cryptographic Node Identity (`PeerId`)
 
-The identity binding is security-critical. When a node receives a BLS signature share from `PeerId X`, the Noise layer has already proven that the connection terminates at the holder of the ed25519 key whose hash is `X`. No additional authentication is needed at the application layer. Similarly, TLS provenance proofs are bound to the signing node's `PeerId`, creating an unbroken chain: **satellite API → TLS proof → node identity → BLS signature share → on-chain verification**.
+In a decentralized network, it is critical to definitively prove *who* is sending a message without relying on a centralized registry. Iris solves this natively at the network layer using `ed25519` keypairs to generate a mathematically verifiable `PeerId`.
 
+**How the `PeerId` is Created & Secured:**
+1. **Key Generation**: When an Iris node is booted for the very first time, it generates a fresh `ed25519` cryptographic keypair. It stores the private key securely on the local disk.
+2. **Derivation**: The node runs its public key through a multihash function. The resulting hash string (e.g., `12D3KooW...`) is the node's `PeerId`. Because it is derived from the public key, the `PeerId` is permanently and exclusively mathematically bound to the private key.
+3. **The Noise Handshake**: Whenever two Iris nodes connect, they perform a Noise Protocol handshake. During this handshake, the connecting node must use its private key to sign a cryptographic challenge. The receiving node verifies the signature against the public key matching the `PeerId`.
+
+**Why This Matters for Iris:**
+This identity binding makes impersonation impossible. When a node receives a BLS signature share or a TLS proof from `PeerId X`, the underlying Noise connection has already cryptographically proven that the sender actively holds the private key for `X`. No additional authentication checks are needed at the application layer. 
+
+Similarly, TLS provenance proofs are bound to the signing node's `PeerId`, creating an unbroken chain: **satellite API → TLS proof → node identity → BLS signature share → on-chain verification**.
+
+#### 4.2.2 Node-to-Node Communication Lifecycle
+
+To understand exactly how the Noise protocol and other network layers are used in practice, here is the chronological setup process every time two Iris nodes communicate (e.g., when the Leader connects to a Regular Node to fetch a GeoTIFF):
+
+1. **The TCP Connection:** Node A initiates a standard TCP connection to Node B's IP address and port. At this stage, the connection is raw, unencrypted, and unauthenticated.
+2. **The Noise Handshake (Security):** Immediately after the TCP connection is open, the nodes execute the **Noise Protocol (XX pattern)**. 
+   * They perform a Diffie-Hellman key exchange to generate a temporary "shared secret" key.
+   * They mutually authenticate by signing a challenge with their long-term `ed25519` private keys.
+   * *Result:* The connection is now mutually authenticated and protected by forward-secure encryption. If a hacker intercepts the traffic, it appears as random noise.
+3. **The Yamux Multiplexer:** With the secure tunnel established, the nodes initialize Yamux. Instead of opening a new TCP connection for every file transfer or gossip message, Yamux allows the nodes to open hundreds of lightweight, concurrent "virtual streams" inside that single encrypted Noise tunnel.
+4. **The Identify Protocol:** The very first virtual stream opened is the `Identify` protocol. The nodes formally introduce themselves by exchanging their `PeerId`, their software version (`iris-node/v1.0.0`), and the specific sub-protocols they support.
+5. **Application Streams:** Once identified, the nodes open further virtual streams for actual Iris protocol work. They will open a long-running stream for `GossipSub` (to exchange lightweight manifests) and temporary `RequestResponse` streams to directly transfer massive 50MB GeoTIFF payloads.
+Because Noise secures the *entire* TCP connection at the lowest level, all subsequent Yamux streams, GossipSub messages, and GeoTIFF transfers are automatically encrypted and inherently trusted to be coming from that specific `PeerId`.
+
+```mermaid
+sequenceDiagram
+    participant A as Node A<br/>(Initiator)
+    participant B as Node B<br/>(Receiver)
+
+    Note over A, B: 1. Unencrypted Transport
+    A->>B: TCP Handshake (SYN / ACK)
+    
+    Note over A, B: 2. Noise Protocol (Security)
+    A->>B: Diffie-Hellman Key Exchange
+    A->>B: Authenticate: Sign with ed25519 Private Key
+    B->>A: Authenticate: Sign with ed25519 Private Key
+    Note over A, B: Connection is now Forward-Encrypted & Mutually Authenticated
+    
+    Note over A, B: 3. Multiplexing
+    A->>B: Initialize Yamux Multiplexer
+    
+    Note over A, B: 4. Identify Protocol (First Yamux Stream)
+    A->>B: Send PeerId & Supported Protocols
+    B->>A: Send PeerId & Supported Protocols
+    
+    Note over A, B: 5. Application Streams (Concurrent Virtual Streams)
+    A->>B: Open Stream: GossipSub (Manifest Exchange)
+    A->>B: Open Stream: RequestResponse (GeoTIFF Transfers)
+```
 ### 4.3 Peer Discovery (Kademlia DHT)
 
 Iris uses a Kademlia Distributed Hash Table for decentralized peer discovery. The Kademlia DHT does not store application data — it is used exclusively for finding other Iris nodes.
 
-#### Bootstrap Process
+#### 4.3.1 Bootstrap Process
 
 When a new node starts for the first time:
 
@@ -251,9 +345,61 @@ When a new node starts for the first time:
 4. **Random walks.** Periodically (every 30 seconds), the node queries a random `PeerId` to further populate its routing table and maintain diverse connections across the keyspace.
 5. **Steady state.** Once the routing table contains enough peers, the node can discover any other node in $O(\log n)$ hops without relying on the bootstrap nodes.
 
-#### Routing Table
+```mermaid
+sequenceDiagram
+    participant N as New Node
+    participant B as Bootstrap Node
+    participant Net as Iris Network (Other Peers)
+    
+    Note over N: 1. Load addresses from iris.toml
+    
+    Note over N, B: 2. Dial Bootstraps
+    N->>B: TCP Connect + Noise Handshake
+    B-->>N: Secure Connection Established
+    N->>B: Identify Protocol (Exchange PeerIds)
+    
+    Note over N, B: 3. Kademlia Self-Lookup
+    N->>B: Kademlia FIND_NODE (Target: Own PeerId)
+    B-->>N: Returns closest peers it knows
+    
+    Note over N, Net: 4. Random Walks & Mesh Building
+    N->>Net: Dial newly discovered peers
+    N->>Net: Kademlia FIND_NODE (Target: Random PeerId)
+    Net-->>N: Returns even more peers
+    
+    Note over N, Net: 5. Steady State
+    Note over N: Routing table is now populated.<br/>Can discover any node in O(log n) hops.
+```
+
+#### 4.3.2 Routing Table
 
 The Kademlia routing table organizes peers into **k-buckets** by XOR distance from the local node's `PeerId`. Each bucket holds up to $k = 20$ peers. The table provides $O(\log n)$ lookup guarantees for a network of $n$ nodes. For Iris's expected committee sizes (10–100 nodes), this means any node can be located in 1–2 hops.
+
+```mermaid
+flowchart TD
+    Root(("Root<br/>(Bit 0)"))
+    
+    %% First split (Bucket 1)
+    Root -- "Bit differs\n(Opposite Half)" --> B1["Bucket 1\n(Furthest Peers)\n[Max 20 Peers]"]
+    Root -- "Bit matches\n(Same Half)" --> N1(("Bit 1"))
+    
+    %% Second split (Bucket 2)
+    N1 -- "Bit differs\n(Opposite Quarter)" --> B2["Bucket 2\n[Max 20 Peers]"]
+    N1 -- "Bit matches\n(Same Quarter)" --> N2(("Bit 2"))
+    
+    %% Third split (Bucket 3)
+    N2 -- "Bit differs\n(Opposite Eighth)" --> B3["Bucket 3\n[Max 20 Peers]"]
+    N2 -- "Bit matches\n(Same Eighth)" --> N3(("..."))
+    
+    %% Last split (Bucket 256)
+    N3 -- "Last bit differs\n(Next-door neighbor)" --> B256["Bucket 256\n(Closest Peers)\n[Max 20 Peers]"]
+    N3 -- "Last bit matches" --> Local["🟢 Local Node\n(Distance: 0)"]
+    
+    classDef bucket fill:#f9f6ff,stroke:#8a2be2,stroke-width:2px;
+    classDef localNode fill:#d4edda,stroke:#28a745,stroke-width:3px;
+    class B1,B2,B3,B256 bucket;
+    class Local localNode;
+```
 
 ### 4.4 Message Propagation (GossipSub v1.1)
 
@@ -266,10 +412,10 @@ Iris defines three GossipSub topics, each carrying a specific message type at a 
 | Topic | Message Type | Payload Size | Published By | Consumed By | Round Phase |
 |-------|-------------|-------------|-------------|-------------|-------------|
 | `iris/requests/v1` | `DataRequest` | ~200 bytes | Relayer (one node) | All nodes | `Idle → Observing` |
-| `iris/observations/v1` | `Manifest` | ~500 bytes | All regular nodes | Leader node | `Observing` |
-| `iris/consensus/v1` | `Proposal` / `BLSShare` / `Rejection` | ~300–800 bytes | Leader (Proposal) / Regular nodes (BLSShare) | All nodes | `PreCommit → Voting → Commit` |
+| `iris/observations/v1` | `Manifest` | ~500 bytes | All **Regular Nodes** | **Leader Node** | `Observing` |
+| `iris/consensus/v1` | `Proposal` / `BLSShare` / `Rejection` | ~300–800 bytes | **Leader Node** (Proposal) / **Regular Nodes** (BLSShare) | All nodes | `PreCommit → Voting → Commit` |
 
-> **Critical design decision:** Full GeoTIFF payloads (10–50 MB each) are **never** published to GossipSub. Gossiping a 50 MB file to a 20-node mesh would produce ~1 GB of total network traffic per observation per node. Instead, only lightweight manifests (~500 bytes) are gossiped. The Leader retrieves full payloads via direct streams (Section 4.5) only when needed.
+> **Critical design decision:** Full GeoTIFF payloads (10–50 MB each) are **never** published to GossipSub. Gossiping a 50 MB file to a 20-node mesh would produce ~1 GB of total network traffic per observation per node. Instead, only lightweight manifests (~500 bytes) are gossiped. The **Leader Node** retrieves full payloads via direct streams (Section 4.5) only when needed.
 
 #### Mesh Topology
 
@@ -307,7 +453,7 @@ A migration to Protobuf (with schema enforcement) is an open decision for post-t
 
 ### 4.5 Direct Streams — GeoTIFF Transfer Protocol
 
-GossipSub is designed for small, fan-out messages. Satellite imagery is neither small nor fan-out — the Leader needs to pull specific GeoTIFFs from specific peers. Iris uses a custom `RequestResponse` protocol for this purpose.
+GossipSub is designed for small, fan-out messages. Satellite imagery is neither small nor fan-out — the **Leader Node** needs to pull specific GeoTIFFs from specific peers. Iris uses a custom `RequestResponse` protocol for this purpose.
 
 #### Protocol Definition
 
@@ -343,11 +489,11 @@ sequenceDiagram
     Note over Leader: All payloads received, run normalization pipeline
 ```
 
-The Leader opens parallel direct streams to all contributing nodes simultaneously (via `tokio` tasks). Each stream is a dedicated Yamux sub-stream — they do not interfere with each other or with GossipSub traffic on the same connection.
+The **Leader Node** opens parallel direct streams to all contributing nodes simultaneously (via `tokio` tasks). Each stream is a dedicated Yamux sub-stream — they do not interfere with each other or with GossipSub traffic on the same connection.
 
 #### Integrity Verification
 
-Upon receiving a GeoTIFF payload, the Leader:
+Upon receiving a GeoTIFF payload, the **Leader Node**:
 
 1. Computes `SHA-256(payload)` and verifies it matches the `image_hash` from the sender's manifest.
 2. Checks that the manifest's `tls_proof_hash` references a valid, verifiable TLS proof (either cached locally or fetched from the sender via a separate request).
@@ -402,9 +548,9 @@ sequenceDiagram
 Notice the two distinct bandwidth regimes:
 
 * **GossipSub traffic** (lightweight, fan-out): `DataRequest` (~200 B) → `Manifest` (~500 B × n) → `Proposal` (~800 B) → `BLSShare` (~300 B × n). For a 20-node committee, total GossipSub traffic per round is under **50 KB**.
-* **Direct stream traffic** (heavy, point-to-point): The Leader pulls ~50 MB × n GeoTIFFs. For a 20-node committee, this is ~**1 GB** — but it flows only to the Leader, not to every peer. During PreCommit verification, regular nodes may also pull the proposed GeoTIFF (~50 MB each) via direct stream from the Leader.
+* **Direct stream traffic** (heavy, point-to-point): The **Leader Node** pulls ~50 MB × n GeoTIFFs. For a 20-node committee, this is ~**1 GB** — but it flows only to the **Leader Node**, not to every peer. During PreCommit verification, **Regular Nodes** may also pull the proposed GeoTIFF (~50 MB each) via direct stream from the **Leader Node**.
 
-This two-tier design keeps the GossipSub mesh fast and lightweight while allowing the Leader to handle bulk data transfer via dedicated point-to-point channels.
+This two-tier design keeps the GossipSub mesh fast and lightweight while allowing the **Leader Node** to handle bulk data transfer via dedicated point-to-point channels.
 
 ### 4.7 Network State Data Structure (Conceptual)
 
@@ -481,10 +627,69 @@ max_concurrent_transfers = 10
 
 ## 5. Data Provenance & Ingestion
 
-To prevent man-in-the-middle attacks and ensure that the GIS data is genuine, nodes must provide cryptographically secure data provenance.
+To prevent man-in-the-middle attacks and ensure that the GIS data is genuine, the network cannot simply trust that a Regular Node downloaded the correct data. Nodes must provide cryptographically secure data provenance.
 
-1. **API Fetching**: Regular nodes request satellite imagery from commercial APIs (e.g., Maxar, Planet, Sentinel) via asynchronous Rust workers (`tokio` + `reqwest`). All incoming imagery is standardized as multi-band GeoTIFFs to preserve geospatial metadata.
-2. **TLS Proofs**: Nodes utilize multi-party computation TLS protocols (TLSNotary) during the data ingestion phase. The node acts as the *Prover*, generating a `.tlsn` cryptographic proof that the data payload was received directly from the authenticated satellite endpoint without tampering. Other nodes act as *Verifiers* to confirm authenticity.
+1. **API Fetching**: **Regular Nodes** request satellite imagery from commercial **Data Providers** (e.g., Maxar, Planet, Sentinel) via asynchronous Rust workers (`tokio` + `reqwest`). All incoming imagery is standardized as multi-band GeoTIFFs to preserve geospatial metadata.
+2. **TLS Proofs**: Nodes utilize multi-party computation TLS protocols (TLSNotary) during the data ingestion phase to mathematically prove the data's origin.
+
+### 5.1 The Chain of Provenance
+
+Because Iris is a decentralized network, it operates under the assumption that individual Regular Nodes are untrusted. If a node were to simply download a GeoTIFF and submit it, there would be nothing stopping that node from modifying the image (e.g., removing a building or altering crop health indicators). 
+
+Furthermore, the data requires heavy preprocessing (standardization and normalization) before it can be used. How can the network ensure the node didn't tamper with the data during preprocessing? 
+
+Iris solves this by establishing a strict, unbroken **Chain of Provenance** that relies on two core mechanisms: Cryptographic Proofs for the raw data, and Deterministic Reproduction for the preprocessing.
+
+#### Step 1: Securing the Raw Data (TLSNotary)
+
+The first link in the chain is guaranteeing that the starting material is genuine. Iris leverages **TLSNotary** (or similar Multi-Party Computation TLS protocols) to create a cryptographic guarantee of the raw data's origin.
+
+1. **The MPC Setup**: When a Regular Node queries a Data Provider's API, it initiates a TLS session where the node acts as a **Prover** in an MPC protocol, assisted by a Notary server. 
+2. **Session Execution**: The node connects to the authenticated endpoint (e.g., `api.maxar.com`) and securely downloads the satellite imagery payload.
+3. **Proof Generation**: The node uses the MPC protocol to generate a `.tlsn` provenance proof. This proof mathematically guarantees that the connection was made to the specific API endpoint and that the raw payload exactly matches what the API sent. **Crucially, this proof only covers the raw, unprocessed data.**
+
+#### Step 2: Deterministic Preprocessing (Trustless Normalization)
+
+Because the `.tlsn` proof only guarantees the integrity of the *raw* payload, the network cannot trust the Regular Node to honestly perform the subsequent normalization (orthorectification, resampling, etc.). 
+
+To maintain the Chain of Provenance, Iris removes trust from the preprocessing phase entirely through **Deterministic Reproduction**:
+
+1. **Sharing the Raw Data**: Instead of submitting preprocessed data, the Regular Node gossips a `Manifest` containing the hash of its `.tlsn` proof. 
+2. **Raw Verification**: The **Leader Node** and other **Regular Nodes** (acting as **Verifiers**) fetch the *raw* GeoTIFF payload and the `.tlsn` proof directly from the node. They verify the proof against the raw payload. If it matches, they have 100% certainty the starting material is genuine.
+3. **Independent Normalization**: Once the raw data is verified, the Verifiers run the data through the Data Normalization Engine locally on their own machines. Because the Rust-based normalization pipeline is strictly deterministic, every honest node running the verified raw data through the pipeline will arrive at the exact same normalized tensor output.
+
+#### Step 3: Cryptographic Sealing (On-Chain Delivery)
+
+Once the Leader computes the Average Scenario from the deterministically normalized tensors, it proposes the final result. The Verifiers, having independently reached the same conclusions from the proven raw data, accept the proposal and sign it. The committee's **BLS Threshold Signature** serves as the final cryptographic seal, delivering the verified reconstruction on-chain.
+
+This mechanism ensures an unbroken, verifiable chain of trust: **Satellite API → TLS proof (Raw Data) → Deterministic Normalization → BLS Signature → On-chain Verification**.
+
+```mermaid
+sequenceDiagram
+    participant Node as Regular Node<br/>(Prover)
+    participant Notary as Notary Server
+    participant API as Data Provider<br/>(e.g., Maxar API)
+    participant Verifier as Leader & Other Nodes<br/>(Verifiers)
+
+    Note over Node, API: 1. Securing the Raw Data (TLSNotary)
+    Node->>Notary: Initiate MPC session
+    Notary-->>Node: Establish MPC parameters
+    Node->>API: TLS Handshake (using MPC keys)
+    API-->>Node: TLS Session Established
+    Node->>API: Request GeoTIFF imagery (HTTP GET)
+    API-->>Node: Encrypted RAW GeoTIFF Payload
+    Node->>Notary: Commit to encrypted payload & session keys
+    Notary-->>Node: Sign cryptographic commitment
+    Node->>Node: Generate .tlsn provenance proof for RAW payload
+
+    Note over Node, Verifier: 2. Deterministic Preprocessing & Verification
+    Node->>Verifier: Gossip Manifest (includes .tlsn hash)
+    Verifier-->>Node: Direct request for RAW GeoTIFF & .tlsn proof
+    Node-->>Verifier: Direct stream: .tlsn proof & RAW GeoTIFF payload
+    Note over Verifier: Verify .tlsn proof against API's public key<br/>and validate RAW GeoTIFF payload integrity
+    Note over Verifier: Verifier runs deterministic normalization<br/>locally on the proven RAW data
+    Verifier-->>Node: Accept Observation
+```
 
 ---
 
@@ -514,7 +719,7 @@ The $\beta$ tuning vector controls how aggressively each type of error destroys 
 
 ### 6.4 Average Scenario Selection
 
-Given $n$ observations from $n$ nodes, the Leader computes all $\binom{n}{2}$ pairwise Similarity Scores, builds a similarity matrix, and selects the image with the highest mean similarity to all others. This image — the **Average Scenario** — becomes the panel's canonical reconstruction.
+Given $n$ observations from $n$ nodes, the **Leader Node** computes all $\binom{n}{2}$ pairwise Similarity Scores, builds a similarity matrix, and selects the image with the highest mean similarity to all others. This image — the **Average Scenario** — becomes the panel's canonical reconstruction.
 
 > **Note:** For the complete mathematical formulation and definitions of the tensors used in this pipeline, refer to the [Data Normalization Specification](./data_normalization.md).
 
@@ -540,11 +745,11 @@ After a request arrives, nodes have a configurable window (default: 30 seconds) 
 
 ### 7.3 Aggregation & Proposal
 
-The Leader collects manifests, retrieves full GeoTIFFs via direct streams, runs the normalization pipeline, selects the Average Scenario, pins it to IPFS, and broadcasts a `Proposal` containing the CID and similarity evidence.
+The **Leader Node** collects manifests, retrieves full GeoTIFFs via direct streams, runs the normalization pipeline, selects the Average Scenario, pins it to IPFS, and broadcasts a `Proposal` containing the CID and similarity evidence.
 
 ### 7.4 Verification & Signing
 
-Regular nodes independently verify the proposal by re-running the normalization pipeline on the proposed image. If the verification passes, they broadcast a BLS partial signature. The Leader collects $t > 2n/3$ shares and aggregates them into a single threshold signature.
+**Regular Nodes** independently verify the proposal by re-running the normalization pipeline on the proposed image. If the verification passes, they broadcast a BLS partial signature. The **Leader Node** collects $t > 2n/3$ shares and aggregates them into a single threshold signature.
 
 ### 7.5 Threshold Cryptography
 
@@ -560,8 +765,8 @@ While the heavy computation (fetching, TLS proof generation, tensor comparisons)
 
 * **Iris Verifier Contract**: Deployed on target host chains (e.g., Ethereum, Polygon), this contract is seeded with the network's aggregate public key and the current epoch counter.
 * **Report Delivery**: The Relayer module submits `deliverReport(requestId, ipfsCid, signature)`. The contract recreates the message digest from `requestId` and `ipfsCid`, then verifies the BLS signature against the stored aggregate public key via precompile (EIP-2537) or a Solidity BLS library.
-* **Tokenomics (Staking & Slashing)**: Node operators must stake IRIS tokens to join the active committee. Dapps pay request fees that are distributed to honest nodes (those whose similarity scores exceeded the threshold). Nodes providing anomalous data or invalid TLS proofs have their stakes slashed.
-* **Dapp Callback**: Upon successful verification, the contract calls `targetContract.onIrisDataReceived(requestId, ipfsCid)` via the `IIrisReceiver` interface, injecting the verified panel into the dapp's ecosystem.
+* **Tokenomics (Staking & Slashing)**: Node operators must stake IRIS tokens to join the active committee. **Requesters** pay request fees that are distributed to honest nodes (those whose similarity scores exceeded the threshold). Nodes providing anomalous data or invalid TLS proofs have their stakes slashed.
+* **Requester Callback**: Upon successful verification, the contract calls `targetContract.onIrisDataReceived(requestId, ipfsCid)` via the `IIrisReceiver` interface, injecting the verified panel into the **Requester**'s ecosystem.
 * **Data Distillation**: External networks (like Chainlink DONs) can query the Iris API Gateway to ingest verified GIS data and distill it into simpler numerical attributes for smart contracts.
 
 ---
@@ -571,12 +776,12 @@ While the heavy computation (fetching, TLS proof generation, tensor comparisons)
 To tie everything together, here is a single request traced through all four state layers:
 
 1. **Committee State** is already established: 7 staked nodes have completed DKG, the aggregate public key is registered on-chain, $t = 5$.
-2. A dapp emits a `DataRequest` event on Ethereum. The **Relayer** picks it up and publishes it to `iris/requests/v1`.
+2. A **Requester** emits a `DataRequest` event on Ethereum. The **Relayer** picks it up and publishes it to `iris/requests/v1`.
 3. Each node's **Node State** spawns a new **Round** (Layer 1). The round enters `Idle → Observing`.
 4. In `Observing`, each node fetches imagery, generates a TLS proof, and publishes a manifest. The **Node State** caches the GeoTIFF locally.
-5. The elected Leader's round transitions to `Aggregating`. The Leader retrieves all GeoTIFFs, runs the normalization pipeline, selects the Average Scenario, and pins it to IPFS.
-6. The Leader's round transitions to `Pre-Commit` and broadcasts the proposal.
-7. Regular nodes verify and transition to `Voting`, broadcasting their BLS signature shares.
-8. The Leader collects 5 shares, aggregates them, and transitions to `Commit`.
+5. The elected **Leader Node**'s round transitions to `Aggregating`. The **Leader Node** retrieves all GeoTIFFs, runs the normalization pipeline, selects the Average Scenario, and pins it to IPFS.
+6. The **Leader Node**'s round transitions to `Pre-Commit` and broadcasts the proposal.
+7. **Regular Nodes** verify and transition to `Voting`, broadcasting their BLS signature shares.
+8. The **Leader Node** collects 5 shares, aggregates them, and transitions to `Commit`.
 9. The Relayer submits the report on-chain. The **Panel** (Layer 3) is now finalized — one more facet of the geodesic sphere.
 10. **Committee State** is unchanged (no nodes joined or left this round). The round is cleaned up from each node's **Node State**.
