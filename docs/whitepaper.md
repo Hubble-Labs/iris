@@ -7,10 +7,10 @@ Key Sections:
 - Vision: What is the long-term vision for Iris?
 
 
-## Iris Whitepaper
+# Iris Whitepaper
 _By Salvador Salcedo_
 
-### Introduction
+## Introduction
 Iris is a Decentralized Terrestrial Satellite Oracle Network or DtsON. It will serve as the network that exists through the communication between the nodes working together to determine the provenance of the requested satellite imagery. Like current oracle networks, such as those built on Chainlink, Iris will allow developers to create new decentralized applications, or dapps, that were impractical or impossible before.  
 
 
@@ -33,10 +33,6 @@ A DtsON as described above would create receipts in the form of hashes of what a
 
 A DtsON like Iris, and the photos it processes, will allow developers to build other Decentralized Oracle Networks or DONs, to distill information from the images and ultimately send simpler data for Smart Contracts (SCs) to react to. This paradigm of chaining DONs, like Iris, together to simplify real world data into actionable data points, like price data, could be the way future Decentralized Applications (dapps) are built. Iris will be the first solution to use a Byzantine Fault Tolerant (BFT) consensus mechanism to verify the similarity and therefore validity or provenance, of satellite imagery.
 
-
-
-
-
 ### Vision
 Applications & Future
 
@@ -46,10 +42,8 @@ Iris is an infrastructure protocol. Thus the end user is never meant to see or i
 
 Kokiri: Voluntary Carbon-Sequestering Asset Tokenization and Market
 
-
 1. The Situation 
 It is no secret that the Earth is warming up due to the over-accumulation of greenhouse gasses in the atmosphere. For years now activists have been sounding the alarm on the dangers of global warming. One of the things to come out of our new awareness and effort to slow, or optimistically reverse, the warming of the earth are carbon credits. 
-
 
 One carbon credit represents one 1 ton of CO2 removed from the atmosphere. They are created when an individual’s or organization’s project reduces, avoids, destroys or captures carbon. Typically, mostly companies but individuals also buy carbon credits to offset their own emissions. There exist two types of carbon credit markets: voluntary and involuntary.
 
@@ -127,44 +121,10 @@ Another goal of this future project will be to provide the resources necessary f
 
 
 
-
-Team
-
-
-Salvador Salcedo, Founder
-
-
-I have been working and learning about BT since early 2014 when I built my first computer and used it to mine Ethereum and Dogecoin. I learned a lot about computer hardware, the mining software and infrastructure and how blockchains in theory worked. My journey in BT continued as the crypto cycles drew me in and out of the world of crypto like a tide. Finally once I was at university I decided to work in BT and crypto economics since I was already versed in it and I had years of classroom software engineering experience. A bit before this decision however, 2020 to be exact, I fell in love with another field of tech - Space Technology (ST). 
-
-
-Since 2020, I have watched videos on SpaceX’s work on their Starship project as dedicated fans peered into their construction facility with their long, bulky cameras at least once a week. My curiosity turned to passion after a few weeks and I joined Space Enterprise at Berkeley - Berkeley’s Liquid Rocket Team. In my 1.5 years in SEB I have built the algorithm that detects rocket apogee using a Kalman Filter, created the closed-loop camera system we use to monitor our engine during firing and as a business team member raised over $10k in a semester among many other things.  
-
-
-
-
-Timeline
-
-
-Sept 20th, Web3athon Conclusion
-
-
-
-References
-
-
-1. Defi Llama. https://defillama.com/oracles [Online; Accessed 5/7/22]
-2. Chainlink Decentralized Data Model. https://docs.chain.link/docs/architecture-decentralized-model/ [Online; Accessed 4/27/22]
-3. Chainlink OCR Model. https://docs.chain.link/docs/off-chain-reporting/. [Online; Accessed 4/27/22]
-4. Baeldung CS. https://www.baeldung.com/cs/image-comparison-algorithm [Online; Accessed 5/1/22]
-
-
-
-
-Glossary
-
+## Glossary
 
 * Actionable Data: Describes real-world data that a smart contract can ingest and use to carry out decisions in a computationally efficient way.
-* Byzantine Fault Tolerant: A description assigned to a mechanism designed to guarantee the authenticity of communications between honest and potentially adversarial participants. 
+* Byzantine Fault Tolerant: A description assigned to a consensus mechanism designed to guarantee the authenticity of communications between honest and potentially adversarial participants. 
 * Cubesat: A class of miniaturized satellite based around a form factor consisting of 10 cm cubes.
 * Decentralized Applications: Web applications that users access through the internet that rely on smart contracts and underlying blockchain technology to execute an economic transaction or function.
 * Node: A computer that runs specialized software meant only to request and send data from a real-world data-source.

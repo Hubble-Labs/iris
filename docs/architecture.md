@@ -2,6 +2,64 @@
 
 This document defines the architecture of the Iris Protocol, a proprietary, standalone Decentralized Terrestrial Satellite Oracle Network (DtsON). Iris enables requesters (decentralized applications or dapps) to reliably ingest, verify, and utilize Geographical Information System (GIS) data, such as satellite imagery.
 
+## Table of Contents
+
+- [1. System Overview: The Chain of Provenance](#1-system-overview-the-chain-of-provenance)
+  - [1.1 The Provenance Pipeline](#11-the-provenance-pipeline)
+  - [1.2 System Actors](#12-system-actors)
+  - [1.3 Non-Goals & Scope Boundaries](#13-non-goals--scope-boundaries)
+- [2. The Geodesic Reconstruction Model](#2-the-geodesic-reconstruction-model)
+  - [2.1 The Analogy: A Sphere of Flat Panels](#21-the-analogy-a-sphere-of-flat-panels)
+  - [2.2 Why This Analogy Matters](#22-why-this-analogy-matters)
+- [3. State Machine Architecture](#3-state-machine-architecture)
+  - [3.1 Layer 1 — Round State](#31-layer-1--round-state-per-request-lifecycle)
+  - [3.2 Layer 2 — Node State](#32-layer-2--node-state-persistent-per-node)
+  - [3.3 Layer 3 — Panel State](#33-layer-3--panel-state-the-reconstruction-output)
+  - [3.4 Layer 4 — Committee State](#34-layer-4--committee-state-network-wide-slow-moving)
+- [4. Network Layer](#4-network-layer)
+  - [4.1 Protocol Stack](#41-protocol-stack)
+  - [4.2 Transport & Security](#42-transport--security)
+  - [4.3 Peer Discovery (Kademlia DHT)](#43-peer-discovery-kademlia-dht)
+  - [4.4 Message Propagation (GossipSub v1.1)](#44-message-propagation-gossipsub-v11)
+  - [4.5 Direct Streams — GeoTIFF Transfer Protocol](#45-direct-streams--geotiff-transfer-protocol)
+  - [4.6 Message Lifecycle — A Complete Round](#46-message-lifecycle--a-complete-round)
+  - [4.7 Network State Data Structure](#47-network-state-data-structure-conceptual)
+  - [4.8 Configuration](#48-configuration-iristoml--network-section)
+- [5. Data Provenance & Ingestion](#5-data-provenance--ingestion)
+  - [5.1 The Provenance Problem](#51-the-provenance-problem)
+  - [5.2 TLSNotary: MPC-Based Proof of Origin](#52-tlsnotary-mpc-based-proof-of-origin)
+  - [5.3 Anatomy of a `.tlsn` Proof](#53-anatomy-of-a-tlsn-proof)
+  - [5.4 Proof Verification](#54-proof-verification)
+  - [5.5 Trust Assumptions & the Notary](#55-trust-assumptions--the-notary)
+- [6. Data Normalization Engine](#6-data-normalization-engine-the-reconstruction-pipeline)
+  - [6.1 Orthorectification](#61-orthorectification)
+  - [6.2 Similarity Metrics](#62-similarity-metrics)
+  - [6.3 Similarity Scoring](#63-similarity-scoring)
+  - [6.4 Average Scenario (Medoid) Selection](#64-average-scenario-medoid-selection)
+- [7. Consensus Engine (Iris-BFT)](#7-consensus-engine-iris-bft)
+  - [7.1 Leader Election](#71-leader-election)
+  - [7.2 Observation Window](#72-observation-window)
+  - [7.3 Aggregation & Proposal](#73-aggregation--proposal)
+  - [7.4 Verification & Signing](#74-verification--signing)
+  - [7.5 Threshold Cryptography](#75-threshold-cryptography)
+- [8. Smart Contract Integration](#8-smart-contract-integration)
+- [9. How the Layers Connect — A Full Request Walkthrough](#9-how-the-layers-connect--a-full-request-walkthrough)
+- [10. System Complexity and Compute Requirements](#10-system-complexity-and-compute-requirements)
+  - [10.1 Cryptographic Compute (Hashing)](#101-cryptographic-compute-hashing)
+  - [10.2 Bandwidth & Network Throughput](#102-bandwidth--network-throughput)
+  - [10.3 Memory (RAM) Requirements](#103-memory-ram-requirements)
+  - [10.4 Normalization Pipeline (CPU/GPU Compute)](#104-normalization-pipeline-cpugpu-compute)
+- [11. End-to-End Fault Tolerance](#11-end-to-end-fault-tolerance)
+
+### Related Documents
+
+| Document | Relationship |
+|----------|-------------|
+| [Whitepaper](./whitepaper.md) | High-level vision and motivation. This architecture doc is the technical realization of the whitepaper's goals |
+| [Data Normalization Specification](./data_normalization.md) | Complete mathematical formulation of the tensor metrics summarized in §6 |
+| [Implementation Plan](./implementation_plan.md) | Phased engineering breakdown that maps directly to the layers defined in §3 |
+| [Threat Model](./threat_model.md) | Adversarial analysis and penalty mechanics referenced in §7 and §8 |
+
 ---
 
 ## 1. System Overview: The Chain of Provenance
@@ -48,6 +106,16 @@ Entities in the Iris network participate in one or more of the following roles:
 * **Relayer**: An off-chain service responsible for bridging communication between the host blockchain and the Iris network. It listens for `DataRequest` events on-chain and broadcasts them to the Iris network, and takes finalized panels to submit them back to the smart contract. **Trust Model & Incentives**: The Relayer is incentivized by a portion of the Requester's fee to cover gas costs. It is completely trustless and cannot forge consensus. Even if a Relayer intercepts the data and computes its own "Average Scenario", it cannot deliver it on-chain because it does not possess the $t$-of-$n$ BLS private key shares required to generate a valid committee threshold signature. It merely transports cryptographically verifiable messages.
 * **Data Provider**: External commercial satellite imagery providers (e.g., Maxar, Planet Labs, Sentinel) that supply the raw geospatial data via HTTPS APIs.
 * **Requester**: Decentralized applications (dapps) or smart contracts on a host blockchain that request satellite data and consume the finalized, verifiable panels.
+
+### 1.3 Non-Goals & Scope Boundaries
+
+To prevent misinterpretation of the protocol's capabilities, the following are explicitly **out of scope** for the Iris architecture as specified in this document:
+
+* **Real-time or streaming imagery.** Iris operates on a request-response model. Each consensus round produces a single panel for a single point in time. Continuous video feeds or real-time monitoring are not supported — a **Requester** must submit a new `DataRequest` for each observation.
+* **Data Provider authentication and access management.** Iris assumes that node operators independently procure API credentials from commercial **Data Providers** (Maxar, Planet, Sentinel, etc.) and configure them in `iris.toml`. The protocol does not broker, subsidize, or manage provider subscriptions.
+* **Historical panel serving.** Iris does not maintain a queryable archive of past panels. Once a panel is finalized, its GeoTIFF and metadata are pinned to IPFS and its CID is recorded on-chain. Retrieval of historical data is the **Requester**'s responsibility via IPFS or on-chain lookups.
+* **Application-layer data interpretation.** Iris delivers verified, provenance-sealed GeoTIFF imagery. It does not extract semantic information (e.g., crop health indices, building counts, flood extent). Downstream interpretation is delegated to application-specific DONs or off-chain services built on top of Iris.
+* **Cross-chain bridge security.** The **Relayer** submits reports to host blockchain smart contracts, but the security of the bridge transport itself (if relaying across chains) is outside Iris's trust boundary.
 
 ---
 
@@ -146,11 +214,26 @@ stateDiagram-v2
 #### Round State Data Structure (Conceptual)
 
 ```rust
+// ── Domain Type Aliases ──────────────────────────────────────────────
+// Zero-cost newtypes / aliases that give PeerId, keys, and hashes
+// distinct semantic meaning across the codebase.
+
+type LeaderId        = PeerId;            // PeerId of the elected leader for a round
+type ContributorId   = PeerId;            // PeerId of a node that contributed an observation
+type ContentHash     = Blake2bHash;       // BLAKE2b hash of a raw GeoTIFF payload
+type ProofHash       = Blake2bHash;       // BLAKE2b hash of a .tlsn proof file
+type AggregateKey    = BlsPublicKey;      // Committee-wide BLS12-381 aggregate public key
+type ShareSecretKey  = BlsSecretKeyShare; // A single node's BLS private key share (from DKG)
+type SharePublicKey  = BlsPublicKeyShare; // A single node's BLS public key share (from DKG)
+type ThresholdSig    = BlsSignature;      // The final aggregated t-of-n BLS signature
+```
+
+```rust
 struct Round {
     // Identity
     request_id:       RequestId,
     round_number:     u64,
-    leader:           PeerId,
+    leader:           LeaderId,
     am_i_leader:      bool,
 
     // Current position in the FSM
@@ -158,8 +241,8 @@ struct Round {
 
     // Observation phase
     my_manifest:      Option<Manifest>,
-    peer_manifests:   HashMap<PeerId, Manifest>,
-    fetched_tensors:  HashMap<ImageHash, AlignedTensor>,  // Leader only
+    peer_manifests:   HashMap<ContributorId, Manifest>,
+    fetched_tensors:  HashMap<ContentHash, AlignedTensor>,  // Leader only
 
     // Aggregation phase (Leader only)
     similarity_matrix: Option<Array2<f64>>,
@@ -167,8 +250,8 @@ struct Round {
 
     // Commit phase
     proposal:          Option<Proposal>,
-    signature_shares:  HashMap<PeerId, BlsSignatureShare>,
-    final_signature:   Option<BlsSignature>,
+    signature_shares:  HashMap<ContributorId, BlsSignatureShare>,
+    final_signature:   Option<ThresholdSig>,
     verification:      Option<VerificationResult>,  // Regular nodes: did I accept the proposal?
 
     // Timing
@@ -189,6 +272,43 @@ This layer persists across rounds. It represents the node's long-lived identity 
 | **Active Rounds** | Map of `RequestId → Round` for the active round. A node may only participate in a single round at a time to mitigate potential computation and networking bottlenecks | New request arrives / round finalizes |
 | **Peer Table** | Kademlia routing table + GossipSub mesh peers | Continuously, via libp2p discovery |
 
+#### Node State Data Structure (Conceptual)
+
+```rust
+struct NodeState {
+    // Cryptographic identity
+    keypair:              ed25519::Keypair,
+    local_peer_id:        PeerId,                       // multihash(public_key)
+    bls_private_share:    Option<ShareSecretKey>,        // Issued during DKG
+
+    // Committee awareness
+    committee_members:    Vec<CommitteeMember>,          // { peer_id, stake_weight, bls_pubkey_share }
+    aggregate_pubkey:     Option<AggregateKey>,          // Committee-wide aggregate key
+    current_epoch:        u64,                           // Monotonic; increments on committee change
+
+    // Provider credentials (loaded from iris.toml)
+    provider_credentials: HashMap<Provider, ApiCredential>,  // e.g., Maxar → Bearer token
+
+    // Local cache (content-addressed storage)
+    cache_root:           PathBuf,                       // ~/.iris/cache/
+    object_store:         HashMap<ContentHash, PathBuf>, // blake2b → objects/<hash>.tiff
+    proof_store:          HashMap<ProofHash, PathBuf>,   // blake2b → proofs/<hash>.tlsn
+
+    // Active round (at most one at a time)
+    active_round:         Option<(RequestId, Round)>,
+
+    // Peer table (managed by libp2p)
+    kademlia_table:       KademliaRoutingTable,
+    gossipsub_mesh:       HashMap<TopicHash, HashSet<PeerId>>,
+}
+
+struct CommitteeMember {
+    peer_id:          PeerId,
+    stake_weight:     u64,
+    bls_pubkey_share: SharePublicKey,
+}
+```
+
 ### 3.3 Layer 3 — Panel State (the reconstruction output)
 
 Each finalized round produces a **Panel** — one facet of the geodesic reconstruction. The Panel is the primary logical output of the Iris network. 
@@ -196,23 +316,23 @@ Each finalized round produces a **Panel** — one facet of the geodesic reconstr
 ```rust
 struct Panel {
     // What patch of Earth does this panel represent?
-    bounding_box:     BoundingBox,      // Geographic coordinates (lat/lon corners)
-    timestamp:        DateTime<Utc>,    // When the imagery was captured
+    bounding_box:       BoundingBox,           // Geographic coordinates (lat/lon corners)
+    timestamp:          DateTime<Utc>,         // When the imagery was captured
 
     // The reconstruction
-    image_hash:       ImageHash,        // BLAKE2b hash of the finalized image
+    image_hash:         ContentHash,           // BLAKE2b hash of the finalized image
 
     // Provenance chain
-    tls_proofs:       Vec<TlsProofRef>, // References to the TLS proofs of contributing nodes
-    contributing_nodes: Vec<PeerId>,    // Which nodes provided imagery for this panel
-    similarity_scores: Vec<f64>,        // Each contributor's similarity score to the Average Scenario
+    tls_proofs:         Vec<TlsProofRef>,      // References to the TLS proofs of contributing nodes
+    contributing_nodes: Vec<ContributorId>,    // Which nodes provided imagery for this panel
+    similarity_scores:  Vec<f64>,              // Each contributor's similarity score to the Average Scenario
 
     // Cryptographic seal
-    bls_signature:    BlsSignature,     // Threshold signature from >2/3 of the committee
-    aggregate_pubkey: BlsPublicKey,     // The committee's aggregate public key at time of signing
+    bls_signature:      ThresholdSig,          // Threshold signature from >2/3 of the committee
+    aggregate_pubkey:   AggregateKey,          // The committee's aggregate public key at time of signing
 
     // On-chain anchor
-    request_id:       RequestId,        // Links back to the originating smart contract event
+    request_id:         RequestId,             // Links back to the originating smart contract event
 }
 ```
 
@@ -238,6 +358,39 @@ The committee is the set of staked, authorized nodes that participate in consens
 | **Aggregate Public Key** | The BLS12-381 aggregate public key representing the committee. Stored both off-chain (in each node's config) and on-chain (in `IrisVerifier.sol`) | DKG ceremony completes after a committee change |
 | **Threshold ($t$)** | The minimum number of signature shares required: $t > \lfloor 2n/3 \rfloor$ | Committee size changes |
 | **Epoch** | A monotonically increasing counter that increments with each committee change. Ensures stale signatures from old committees cannot be replayed | `updateCommittee()` is called on-chain |
+
+#### Committee State Data Structure (Conceptual)
+
+```rust
+struct CommitteeState {
+    // Active validator set
+    active_set:       Vec<ValidatorEntry>,   // Ordered by cumulative stake
+    total_stake:      u64,                   // Sum of all stake weights
+
+    // Threshold cryptography
+    aggregate_pubkey: AggregateKey,          // BLS12-381 aggregate public key
+    threshold:        usize,                 // t > floor(2n/3) required signature shares
+    dkg_state:        DkgState,              // Idle | InProgress | Completed
+
+    // Epoch tracking
+    epoch:            u64,                   // Monotonic; increments on committee change
+    last_dkg_block:   u64,                   // Block height of last successful DKG
+}
+
+struct ValidatorEntry {
+    peer_id:          PeerId,
+    stake_weight:     u64,
+    bls_pubkey_share: SharePublicKey,
+    cumulative_stake: u64,  // Used for leader election range mapping
+    status:           ValidatorStatus,       // PendingJoin | Active | SlashedExited
+}
+
+enum DkgState {
+    Idle,
+    InProgress { participants: Vec<PeerId>, round: u32 },
+    Completed { shares_dealt: usize },
+}
+```
 
 #### Committee Lifecycle
 
@@ -659,69 +812,112 @@ max_concurrent_transfers = 10
 
 ## 5. Data Provenance & Ingestion
 
-To prevent man-in-the-middle attacks and ensure that the GIS data is genuine, the network cannot simply trust that a Regular Node downloaded the correct data. Nodes must provide cryptographically secure data provenance.
+This section is a focused deep-dive into the cryptographic mechanism that secures the first link in the Chain of Provenance: proving that raw satellite imagery is genuine and untampered. For the full round lifecycle that *uses* these proofs (observation, aggregation, verification, signing), see [§3.1 — Round State](#31-layer-1--round-state-per-request-lifecycle). For the normalization pipeline that processes verified raw data, see [§6 — Data Normalization Engine](#6-data-normalization-engine-the-reconstruction-pipeline).
 
-1. **API Fetching**: **Regular Nodes** request satellite imagery from commercial **Data Providers** (e.g., Maxar, Planet, Sentinel) via asynchronous Rust workers (`tokio` + `reqwest`). All incoming imagery is standardized as multi-band GeoTIFFs to preserve geospatial metadata.
-2. **TLS Proofs**: Nodes utilize multi-party computation TLS protocols (TLSNotary) during the data ingestion phase to mathematically prove the data's origin.
+### 5.1 The Provenance Problem
 
-### 5.1 The Chain of Provenance
+Iris operates under the assumption that individual **Regular Nodes** are untrusted. If a node were to simply download a GeoTIFF and submit it, nothing would prevent that node from modifying the image (e.g., removing a building or altering crop health indicators). Furthermore, the data requires heavy preprocessing (orthorectification, resampling) before the network can compare it — and the network cannot trust the node to perform that preprocessing honestly.
 
-Because Iris is a decentralized network, it operates under the assumption that individual Regular Nodes are untrusted. If a node were to simply download a GeoTIFF and submit it, there would be nothing stopping that node from modifying the image (e.g., removing a building or altering crop health indicators). 
+Iris solves this with an unbroken **Chain of Provenance** built on two mechanisms:
 
-Furthermore, the data requires heavy preprocessing (standardization and normalization) before it can be used. How can the network ensure the node didn't tamper with the data during preprocessing? 
+1. **Cryptographic Proofs** (this section): TLSNotary MPC proofs guarantee the raw data's origin.
+2. **Deterministic Reproduction** (§6, §7.4): Verifiers independently re-run the normalization pipeline on the proven raw data, ensuring any tampering during preprocessing is detected.
 
-Iris solves this by establishing a strict, unbroken **Chain of Provenance** that relies on two core mechanisms: Cryptographic Proofs for the raw data, and Deterministic Reproduction for the preprocessing.
+The result is a verifiable chain: **Satellite API → TLS proof (Raw Data) → Deterministic Normalization → BLS Signature → On-chain Verification**.
 
-#### Step 1: Securing the Raw Data (TLSNotary)
+### 5.2 TLSNotary: MPC-Based Proof of Origin
 
-The first link in the chain is guaranteeing that the starting material is genuine. Iris leverages **TLSNotary** (or similar Multi-Party Computation TLS protocols) to create a cryptographic guarantee of the raw data's origin.
+Iris leverages **TLSNotary** — a Multi-Party Computation (MPC) protocol built on top of standard TLS — to create a cryptographic guarantee of the raw data's origin without requiring cooperation from the **Data Provider**.
 
-1. **The MPC Setup**: When a Regular Node queries a Data Provider's API, it initiates a TLS session where the node acts as a **Prover** in an MPC protocol, assisted by a Notary server. 
-2. **Session Execution**: The node connects to the authenticated endpoint (e.g., `api.maxar.com`) and securely downloads the satellite imagery payload.
-3. **Proof Generation**: The node uses the MPC protocol to generate a `.tlsn` provenance proof. This proof mathematically guarantees that the connection was made to the specific API endpoint and that the raw payload exactly matches what the API sent. **Crucially, this proof only covers the raw, unprocessed data.**
+#### The MPC Session
 
-#### Step 2: Deterministic Preprocessing (Trustless Normalization)
+When a **Regular Node** queries a **Data Provider**'s API during the `Observing` phase (see §3.1), it does not simply open a normal TLS connection. Instead:
 
-Because the `.tlsn` proof only guarantees the integrity of the *raw* payload, the network cannot trust the Regular Node to honestly perform the subsequent normalization (orthorectification, resampling, etc.). 
-
-To maintain the Chain of Provenance, Iris removes trust from the preprocessing phase entirely through **Deterministic Reproduction**:
-
-1. **Sharing the Raw Data**: Instead of submitting preprocessed data, the Regular Node gossips a `Manifest` containing the hash of its `.tlsn` proof. 
-2. **Raw Verification**: The **Leader Node** and other **Regular Nodes** (acting as **Verifiers**) fetch the *raw* GeoTIFF payload and the `.tlsn` proof directly from the node. They verify the proof against the raw payload. If it matches, they have 100% certainty the starting material is genuine.
-3. **Independent Normalization**: Once the raw data is verified, the Verifiers run the data through the Data Normalization Engine locally on their own machines. Because the Rust-based normalization pipeline is strictly deterministic, every honest node running the verified raw data through the pipeline will arrive at the exact same normalized tensor output.
-
-#### Step 3: Cryptographic Sealing (On-Chain Delivery)
-
-Once the Leader computes the Average Scenario from the deterministically normalized tensors, it proposes the final result. The Verifiers, having independently reached the same conclusions from the proven raw data, accept the proposal and sign it. The committee's **BLS Threshold Signature** serves as the final cryptographic seal, delivering the verified reconstruction on-chain.
-
-This mechanism ensures an unbroken, verifiable chain of trust: **Satellite API → TLS proof (Raw Data) → Deterministic Normalization → BLS Signature → On-chain Verification**.
+1. **Prover & Notary Roles**: The node acts as the **Prover** in a 2-party MPC protocol. A separate **Notary** server participates as the second party. Together, they jointly execute the TLS handshake and session without either party holding the complete TLS session keys.
+2. **Garbled Circuit Execution**: The TLS key exchange is computed via an oblivious transfer / garbled circuit protocol. The Prover holds its share of the pre-master secret; the Notary holds the other share. Neither party can decrypt the TLS traffic alone — both shares are required.
+3. **Session Execution**: The node connects to the authenticated endpoint (e.g., `api.maxar.com`), performs the TLS handshake using the MPC-derived keys, and downloads the satellite imagery payload. The Notary sees the *encrypted* traffic but cannot read the plaintext.
+4. **Selective Disclosure**: After the session completes, the Prover can selectively reveal portions of the transcript to the Notary for signing, while redacting sensitive fields (e.g., API keys in request headers). The Notary signs a commitment over the revealed portions.
 
 ```mermaid
 sequenceDiagram
     participant Node as Regular Node<br/>(Prover)
     participant Notary as Notary Server
     participant API as Data Provider<br/>(e.g., Maxar API)
-    participant Verifier as Leader & Other Nodes<br/>(Verifiers)
 
-    Note over Node, API: 1. Securing the Raw Data (TLSNotary)
+    Note over Node, API: MPC-TLS Session Setup
     Node->>Notary: Initiate MPC session
-    Notary-->>Node: Establish MPC parameters
-    Node->>API: TLS Handshake (using MPC keys)
+    Notary-->>Node: Establish MPC parameters (OT setup)
+    Note over Node, Notary: Joint TLS key derivation via garbled circuits
+    Node->>API: TLS Handshake (using MPC-derived keys)
     API-->>Node: TLS Session Established
+
+    Note over Node, API: Data Transfer
     Node->>API: Request GeoTIFF imagery (HTTP GET)
     API-->>Node: Encrypted RAW GeoTIFF Payload
-    Node->>Notary: Commit to encrypted payload & session keys
-    Notary-->>Node: Sign cryptographic commitment
-    Node->>Node: Generate .tlsn provenance proof for RAW payload
 
-    Note over Node, Verifier: 2. Deterministic Preprocessing & Verification
-    Node->>Verifier: Gossip Manifest (includes .tlsn hash)
-    Verifier-->>Node: Direct request for RAW GeoTIFF & .tlsn proof
-    Node-->>Verifier: Direct stream: .tlsn proof & RAW GeoTIFF payload
-    Note over Verifier: Verify .tlsn proof against API's public key<br/>and validate RAW GeoTIFF payload integrity
-    Note over Verifier: Verifier runs deterministic normalization<br/>locally on the proven RAW data
-    Verifier-->>Node: Accept Observation
+    Note over Node, Notary: Proof Generation
+    Node->>Notary: Selectively disclose transcript (redact API key)
+    Notary-->>Node: Sign cryptographic commitment over disclosed data
+    Node->>Node: Assemble .tlsn provenance proof
 ```
+
+### 5.3 Anatomy of a `.tlsn` Proof
+
+The `.tlsn` proof file is the artifact that a **Regular Node** produces after a successful TLSNotary session. It is a self-contained, portable proof that any third party can verify without contacting the original **Data Provider** or the **Notary**. The proof contains:
+
+| Field | Description |
+|-------|-------------|
+| **Server Identity** | The DNS hostname and TLS certificate chain of the **Data Provider** (e.g., `api.maxar.com`). Proves the connection was made to the authentic API endpoint, not a spoofed server |
+| **Session Parameters** | The TLS version, cipher suite, and session ID. Anchors the proof to a specific cryptographic session |
+| **Request Transcript** | The HTTP request sent by the node (with sensitive fields like `Authorization` headers redacted via selective disclosure). Proves *what* was requested (coordinates, timestamp, imagery product) |
+| **Response Transcript** | The HTTP response body — the raw GeoTIFF payload. This is the critical field: it contains the exact bytes the API returned |
+| **Response Hash** | A `BLAKE2b` hash of the raw response payload. This hash is what appears in the node's `Manifest` as `tls_proof_hash`, linking the GossipSub message to the proof |
+| **Notary Signature** | The Notary's cryptographic signature over the committed transcript. This is the root of trust — it attests that the Notary co-participated in the MPC-TLS session and witnessed the disclosed portions |
+| **Notary Public Key** | The public key of the Notary that produced the signature, enabling verification without contacting the Notary |
+| **Timestamp** | The wall-clock time of the session, signed by the Notary |
+
+> **Key Property:** The `.tlsn` proof only covers the **raw, unprocessed** API response. It does not — and cannot — attest to any post-processing the node performs on the data. This is why Iris requires Deterministic Reproduction (§6, §7.4) as the second link in the provenance chain.
+
+### 5.4 Proof Verification
+
+Any node in the network can verify a `.tlsn` proof by performing the following steps. This verification is executed by the **Leader Node** during the `Aggregating` phase and by **Regular Nodes** during the `PreCommit` phase (see §3.1 for phase definitions).
+
+1. **Certificate Chain Validation**: Verify the TLS certificate chain in the proof against the system's trusted CA root store. Confirm the server's hostname matches an approved **Data Provider** (e.g., `api.maxar.com`, `api.planet.com`). This prevents proofs forged against rogue servers.
+2. **Notary Signature Verification**: Verify the Notary's signature over the committed transcript using the embedded Notary public key. The Notary public key must belong to a set of approved Notaries (see §5.5).
+3. **Payload Integrity Check**: Compute `BLAKE2b(response_payload)` from the proof's response transcript and verify it matches the `image_hash` advertised in the node's `Manifest`. This binds the GossipSub attestation to the proven raw data.
+4. **Request Plausibility Check**: Inspect the (selectively disclosed) request transcript to confirm the query parameters match the active `DataRequest` — i.e., the bounding box and timestamp in the HTTP request are consistent with the AoI being reconstructed.
+5. **Timestamp Freshness**: Verify the Notary-signed timestamp falls within an acceptable window relative to the `DataRequest` event's block timestamp. This prevents replay of stale proofs from previous rounds.
+
+If any step fails, the proof is rejected, the associated payload is discarded, and the contributing node's GossipSub peer score is penalized (see §4.4 — Peer Scoring).
+
+### 5.5 Trust Assumptions & the Notary
+
+The Notary server is the root of trust in the TLSNotary protocol. Understanding its trust boundary is critical for evaluating Iris's security guarantees.
+
+#### What the Notary *can* do
+
+* **Attest to session authenticity**: The Notary co-participated in the TLS key derivation and can sign a commitment certifying that the transcript is genuine.
+* **Deny service**: A malicious or offline Notary can refuse to participate, preventing the Prover from generating a proof. This is a **liveness** concern, not a safety concern — it causes the node to fail its observation, not to produce a forged proof.
+
+#### What the Notary *cannot* do
+
+* **Read the plaintext**: Because the TLS keys are split via MPC, the Notary only sees encrypted traffic (unless the Prover selectively discloses portions). The Notary cannot access the raw GeoTIFF data or API credentials.
+* **Forge a proof alone**: The Notary's signature is over a transcript that requires the Prover's participation to construct. A Notary cannot unilaterally create a valid proof for a session that never occurred.
+
+#### What the Notary *could* do if colluding with the Prover
+
+* **Co-sign a fabricated transcript**: If both the Prover and the Notary collude, they could jointly construct a `.tlsn` proof for a session that never happened (or that connected to a different server). This is the fundamental trust assumption of TLSNotary.
+
+#### Iris's Mitigation Strategy
+
+| Approach | Status | Description |
+|----------|--------|-------------|
+| **Approved Notary Set** | MVP | The network maintains a whitelist of approved Notary public keys. Proofs signed by unknown Notaries are rejected. Initially, the Iris Foundation operates the approved Notaries |
+| **Notary Diversity Requirement** | Planned | Require that nodes in the same round use *different* Notary servers, preventing a single compromised Notary from affecting all observations |
+| **Decentralized Notary Pool** | Future | Transition to a permissionless pool of staked Notary operators. Notaries that co-sign fabricated proofs (detected via cross-referencing with other providers' data for the same AoI) are slashed |
+| **Multi-Notary MPC** | Research | Extend the 2-party MPC to a $k$-of-$m$ threshold MPC, where multiple independent Notaries must jointly attest to a session. This eliminates single-Notary collusion entirely |
+
+> **Bottom Line:** In the MVP, the Notary is a semi-trusted centralized service operated by the Iris Foundation. This is an acceptable bootstrapping compromise because: (a) the Notary cannot read the data, (b) the Notary cannot forge proofs alone, and (c) even if the Notary colludes with one Prover, the BFT threshold ($t > 2n/3$) ensures that a single forged observation cannot swing consensus. The roadmap progressively decentralizes the Notary role.
 
 ---
 
@@ -814,6 +1010,8 @@ While the heavy computation (fetching, TLS proof generation, tensor comparisons)
 ---
 
 ## 9. How the Layers Connect — A Full Request Walkthrough
+
+> **Note:** This walkthrough intentionally revisits the state transitions from §3.1 and the provenance chain from §5. It is designed as a consolidated reference summary that traces a single request through all four state layers end-to-end.
 
 To tie everything together, here is a single request traced through all four state layers:
 
