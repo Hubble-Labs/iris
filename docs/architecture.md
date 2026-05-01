@@ -205,7 +205,7 @@ stateDiagram-v2
 | State | Who is active | What is being tracked | Exit condition |
 |-------|--------------|----------------------|----------------|
 | **Idle** | All nodes | Subscription to `iris/requests/v1`. The node is listening for the next `DataRequest` event from the blockchain **Relayer** (which bridges the on-chain request to the off-chain network) or GossipSub. | A valid `DataRequest` is received and the node determines the **Leader Node** for this round via the election algorithm. |
-| **Observing** | All **Regular Nodes** | Each node independently: (1) fetches imagery from its assigned **Data Provider**, (2) generates a TLS provenance proof via TLSNotary, (3) parses the GeoTIFF into a tensor, (4) constructs a lightweight `Manifest` containing `{image_hash, bounding_box, timestamp, tls_proof_hash, node_signature}`, and (5) publishes the manifest to `iris/observations/v1`. The node tracks: which providers it queried, the local file path of the cached GeoTIFF, the `.tlsn` proof path, and its own manifest. | The node has published its manifest AND the observation window timer expires (e.g., 30 seconds). |
+| **Observing** | All **Regular Nodes** | Two-phase deadline (see §7.2). **Phase 1 (60s):** each node initiates a TLSNotary MPC session, completes the TLS handshake with its Data Provider, and publishes a `TlsCommitment` to `iris/observations/v1`. Nodes that miss this deadline are excluded immediately. **Phase 2 (300s from round start):** each committed node completes the full payload download, finalizes the `.tlsn` proof, computes `BLAKE2b(payload)`, and publishes a final `Manifest` containing `{image_hash, bounding_box, timestamp, tls_proof_hash, node_signature}`. The node tracks: which providers it queried, TLS session state, the local file path of the cached GeoTIFF, the `.tlsn` proof path, and its own manifest. | The Phase 2 deadline elapses (300s); the Leader proceeds to Aggregating with all nodes that delivered a valid final `Manifest`. |
 | **Aggregating** | **Leader Node** only | The **Leader Node** collects all manifests from `iris/observations/v1`. For each manifest, the **Leader Node** requests the full GeoTIFF payload via a direct libp2p stream (the Bitswap-like transfer protocol). Once all payloads are retrieved, the **Leader Node** runs the full normalization pipeline: orthorectification → similarity metrics ($\mu_1$, $\mu_2$, $\mu_3$) → exponential decay scoring $\mathcal{S}(\mu)$ → pairwise similarity matrix → Average Scenario selection. The **Leader Node** tracks: the similarity matrix, the selected Average Scenario tensor, and its corresponding image hash. | The **Leader Node** has computed the Average Scenario and pinned it to IPFS, obtaining a CID. |
 | **Pre-Commit** | **Leader Node** broadcasts, all **Regular Nodes** listen | The **Leader Node** publishes a `Proposal` message to `iris/consensus/v1` containing: `{request_id, selected_image_hash, ipfs_cid, similarity_matrix_summary, leader_signature}`. Each **Regular Node** independently verifies the proposal by: (1) checking the TLS proof for the selected image, (2) fetching the proposed GeoTIFF via libp2p stream, (3) re-running the tensor normalization pipeline locally to confirm the similarity scores, and (4) verifying the IPFS CID matches. The node tracks: verification result (accept/reject), its own partial BLS signature (if accepted). | Each node has either broadcast a BLS signature share to `iris/consensus/v1` (accept) or broadcast a rejection (reject). |
 | **Voting** | **Leader Node** collects | The **Leader Node** collects BLS signature shares from `iris/consensus/v1`. It tracks: which nodes have responded, the count of accepts vs. rejects, the partial signatures received. | The **Leader Node** has collected $t$ valid signature shares (where $t > 2n/3$), OR the voting timer expires. |
@@ -255,7 +255,9 @@ struct Round {
     verification:      Option<VerificationResult>,  // Regular nodes: did I accept the proposal?
 
     // Timing
-    phase_deadline:    Instant,
+    tls_commitment_deadline: Instant,  // Phase 1: 60s — must publish TlsCommitment
+    manifest_deadline:       Instant,  // Phase 2: 300s from round start — must publish Manifest
+    phase_deadline:          Instant,  // Current active phase deadline (Aggregating, Voting, etc.)
 }
 ```
 
@@ -269,7 +271,7 @@ This layer persists across rounds. It represents the node's long-lived identity 
 | **Committee Membership** | List of known committee members, their `PeerId`s, stake weights, BLS public key shares, and the aggregate public key | DKG ceremony completes after a committee change |
 | **Provider Credentials** | API keys/tokens for **Data Providers** (Maxar, Planet, Sentinel) | Configured by operator in `iris.toml` |
 | **Local Cache** | Content-addressed storage for GeoTIFFs (`~/.iris/cache/objects/<blake2b>.tiff`) and TLS proofs (`~/.iris/proofs/<hash>.tlsn`), with operator-friendly symlinks generated per request (`~/.iris/cache/rounds/<request_id>/<provider>_<timestamp>.tiff`) | After every successful fetch |
-| **Active Rounds** | Map of `RequestId → Round` for the active round. A node may only participate in a single round at a time to mitigate potential computation and networking bottlenecks | New request arrives / round finalizes |
+| **Active Rounds** | Map of `RequestId → Round` for all rounds the node is currently participating in. **MVP constraint:** limited to one active round at a time to conserve resources and prevent rounds from interfering with each other (competing for bandwidth during GeoTIFF transfer, CPU during normalization). Because rounds are fully independent — each has its own request ID, leader, observation window, and commit — this constraint is an implementation simplification, not a protocol requirement. A future upgrade can lift it to allow concurrent rounds, subject to configurable resource limits | New request arrives / round finalizes |
 | **Peer Table** | Kademlia routing table + GossipSub mesh peers | Continuously, via libp2p discovery |
 
 #### Node State Data Structure (Conceptual)
@@ -294,7 +296,7 @@ struct NodeState {
     object_store:         HashMap<ContentHash, PathBuf>, // blake2b → objects/<hash>.tiff
     proof_store:          HashMap<ProofHash, PathBuf>,   // blake2b → proofs/<hash>.tlsn
 
-    // Active round (at most one at a time)
+    // MVP: at most one active round; future: bounded concurrent rounds
     active_round:         Option<(RequestId, Round)>,
 
     // Peer table (managed by libp2p)
@@ -399,7 +401,9 @@ stateDiagram-v2
     [*] --> PendingJoin : Node stakes IRIS tokens
     PendingJoin --> DKGInProgress : Governance approves
     DKGInProgress --> ActiveCommittee : DKG succeeds<br/>(new shares dealt)
-    DKGInProgress --> PendingJoin : DKG fails<br/>(retry)
+    DKGInProgress --> PendingJoin : DKG fails<br/>(retry, attempts < 3)
+    DKGInProgress --> DkgAborted : DKG fails<br/>(attempts ≥ 3 or ceremony timeout)
+    DkgAborted --> [*] : Pending node dropped<br/>(prior committee retained)
     ActiveCommittee --> SlashedExited : Slash or unstake
     SlashedExited --> [*]
 
@@ -410,6 +414,26 @@ stateDiagram-v2
         [*] --> ParticipatingInRounds
     }
 ```
+
+#### DKG Failure Handling
+
+The Distributed Key Generation ceremony is a synchronous multi-round protocol; any participant going offline, sending a malformed share, or failing a verification check causes the ceremony to abort. Because committee changes are infrequent and DKG is gated by on-chain governance, Iris favors **safety over liveness** here — a stalled DKG never silently degrades the threshold or the aggregate key.
+
+**What constitutes a DKG failure.** A ceremony is considered failed if any of the following hold before the round timeout:
+- A participant fails to broadcast its commitment or share within the per-round timeout (default **60s per DKG round**).
+- A dealt share fails the public verification check (e.g., does not match the published commitment).
+- Fewer than $t$ honest participants complete all rounds successfully.
+- The participant set diverges (nodes disagree on the active membership for the ceremony).
+
+**Retry policy.** A failed ceremony is retried up to **3 times** for a given committee transition. Each retry begins from a fresh nonce and re-broadcasts the participant list. The total ceremony budget (including retries) is bounded by a **15-minute wall-clock timeout** measured from governance approval; this prevents an indefinitely-stalled ceremony from blocking subsequent committee changes.
+
+**Permanent abort.** If all retries are exhausted, or the wall-clock budget elapses, the ceremony enters `DkgAborted`. In this state:
+- The **prior committee remains active** with its existing aggregate key and epoch — the network continues processing rounds without interruption.
+- Any node in `PendingJoin` for this transition is **dropped back to the unstaked pool** and must re-submit its join request through governance. Its stake is *not* slashed (the failure is not attributable on-chain), but it forfeits the gas spent on the join transaction.
+- A node that was provably the cause of the failure (e.g., signed a malformed share) MAY be slashed under the misbehavior rules in [threat_model.md](./threat_model.md); attribution is published as part of the ceremony transcript.
+- A new ceremony for the same pending node can only be initiated after a **cooldown of one epoch**, to prevent grief-loops where a faulty node repeatedly stalls committee transitions.
+
+**Liveness implication.** Because the prior committee is retained on permanent abort, the network never loses its ability to sign panels — the worst case is that committee membership becomes "sticky" until governance approves a different candidate. This is the intended trade-off: a wedged DKG should not be able to halt request processing.
 
 ---
 
@@ -628,11 +652,13 @@ Peers whose score drops below a configurable threshold are disconnected from the
 
 #### Message Serialization
 
-All GossipSub messages are serialized using **serde-cbor** (Concise Binary Object Representation). CBOR was chosen over Protobuf for the MVP because:
+All GossipSub messages are serialized using **CBOR** (Concise Binary Object Representation) via the [`ciborium`](https://crates.io/crates/ciborium) crate. CBOR was chosen over Protobuf for the MVP because:
 
 * It is schema-free, simplifying rapid iteration during development.
 * It is self-describing, making debugging easier.
 * The `serde` ecosystem in Rust provides zero-cost serialization with `#[derive(Serialize, Deserialize)]`.
+
+> **Crate note:** `ciborium` is used instead of the older `serde-cbor` crate, which has been unmaintained since 2021. `ciborium` is the actively maintained CBOR implementation for the `serde` ecosystem and is a drop-in replacement for serialization purposes.
 
 A migration to Protobuf (with schema enforcement) is an open decision for post-testnet hardening.
 
@@ -908,16 +934,18 @@ The Notary server is the root of trust in the TLSNotary protocol. Understanding 
 
 * **Co-sign a fabricated transcript**: If both the Prover and the Notary collude, they could jointly construct a `.tlsn` proof for a session that never happened (or that connected to a different server). This is the fundamental trust assumption of TLSNotary.
 
-#### Iris's Mitigation Strategy
+#### Notary Trust Model — Phase Roadmap
 
-| Approach | Status | Description |
-|----------|--------|-------------|
-| **Approved Notary Set** | MVP | The network maintains a whitelist of approved Notary public keys. Proofs signed by unknown Notaries are rejected. Initially, the Iris Foundation operates the approved Notaries |
-| **Notary Diversity Requirement** | Planned | Require that nodes in the same round use *different* Notary servers, preventing a single compromised Notary from affecting all observations |
-| **Decentralized Notary Pool** | Future | Transition to a permissionless pool of staked Notary operators. Notaries that co-sign fabricated proofs (detected via cross-referencing with other providers' data for the same AoI) are slashed |
-| **Multi-Notary MPC** | Research | Extend the 2-party MPC to a $k$-of-$m$ threshold MPC, where multiple independent Notaries must jointly attest to a session. This eliminates single-Notary collusion entirely |
+The Notary role is a known bootstrapping compromise. Iris addresses it through a three-phase progression rather than requiring full decentralization before launch:
 
-> **Bottom Line:** In the MVP, the Notary is a semi-trusted centralized service operated by the Iris Foundation. This is an acceptable bootstrapping compromise because: (a) the Notary cannot read the data, (b) the Notary cannot forge proofs alone, and (c) even if the Notary colludes with one Prover, the BFT threshold ($t > 2n/3$) ensures that a single forged observation cannot swing consensus. The roadmap progressively decentralizes the Notary role.
+| Phase | Operator | Status | Description |
+|-------|----------|--------|-------------|
+| **Phase 1 — Hosted Notary** | [TLSNotary](https://tlsnotary.org) (PSE / EF) | **MVP** | Iris uses TLSNotary's publicly operated notary infrastructure. The network maintains a whitelist of approved Notary public keys; proofs signed by any other key are rejected. TLSNotary is an open-source, non-profit effort, giving it a higher trust baseline than a commercial operator — but it is still a single third-party dependency |
+| **Phase 2 — Foundation-Operated Notaries** | Iris Foundation | Planned | The Iris Foundation operates its own fleet of Notary servers, reducing dependency on a third party. Notary diversity is enforced: nodes in the same round must use *different* approved Notary servers, so no single Notary compromise affects more than one observation per round |
+| **Phase 3 — Decentralized Notary Pool** | Permissionless staked operators | Future | Transition to a permissionless pool of staked Notary operators. Any operator meeting a minimum stake requirement can register. Notaries that co-sign fabricated proofs (detected via cross-referencing independent provider data for the same AoI) are slashed. This phase removes all single-operator trust |
+| **Phase 4 — Threshold Notarization** | Multi-party committee | Research | Extend the 2-party MPC to a $k$-of-$m$ threshold protocol where multiple independent Notaries must jointly attest to a session. This eliminates single-Notary collusion entirely without requiring an honest majority — only $k$ of $m$ need to be honest |
+
+> **Bottom Line:** In the MVP, the Notary is TLSNotary's hosted service — a centralized but reputable, open-source third party. This is an acceptable bootstrapping compromise because: (a) the Notary cannot read the plaintext data, (b) the Notary cannot forge proofs unilaterally, and (c) even if a Notary colludes with a single Prover, the BFT threshold ($t > 2n/3$) ensures one forged observation cannot swing consensus. The roadmap progressively transfers Notary operation from a third party → the Iris Foundation → a fully permissionless pool.
 
 ---
 
@@ -964,8 +992,10 @@ The Iris-BFT consensus drives the Round State Machine (Section 3.1). Its role is
 A deterministic, stake-weighted round-robin algorithm selects the Leader for each round:
 
 ```
-leader_index = hash(block_hash ‖ request_id) % total_stake
+leader_index = keccak256(block_hash ‖ request_id) % total_stake
 ```
+
+**Keccak-256** is specified here — not BLAKE2b — because this computation must be reproducible in smart contracts. Keccak-256 is EVM-native and available as a cheap precompile on all target chains; off-chain, `tiny-keccak` produces the same result in Rust. The input is always small (~64 bytes), so Keccak-256's slower throughput on large payloads is irrelevant here.
 
 The index is mapped to the node whose cumulative stake range covers that value. Because the inputs (block hash, request ID) are publicly known, every node independently computes the same Leader without extra communication.
 
@@ -973,7 +1003,32 @@ The index is mapped to the node whose cumulative stake range covers that value. 
 
 ### 7.2 Observation Window
 
-After a request arrives, nodes have a configurable window (default: 30 seconds) to fetch imagery, generate TLS proofs, and publish their manifests. Manifests are lightweight — they contain only the image hash, bounding box, TLS proof hash, and node signature. Full GeoTIFFs are never gossiped.
+The observation window is split into two sequential deadlines. This allows the Leader to detect non-participating nodes early and fail the round fast — before resources are spent downloading multi-GB payloads — rather than waiting the full window for nodes that were never going to contribute.
+
+#### Phase 1 — TLS Commitment (default: 60 seconds)
+
+Within 60 seconds of the `DataRequest` being received, each Regular Node must:
+1. Initiate a TLSNotary MPC session with an approved Notary server
+2. Begin the TLS handshake with the Data Provider API
+3. Publish a lightweight **`TlsCommitment`** message to `iris/observations/v1` containing `{request_id, provider, bounding_box, tls_session_id, notary_pubkey, node_signature}`
+
+The `TlsCommitment` proves the node is actively participating and that TLS authentication with the Data Provider succeeded. It does not require the payload to be downloaded yet — only that the MPC session is established and the TLS handshake is complete.
+
+**Why 60s:** This covers typical Data Provider API authentication latency (5–30s) plus network round-trips to the Notary for MPC setup, with headroom for slower nodes.
+
+Nodes that fail to publish a `TlsCommitment` within 60s are excluded from the round immediately. The Leader does not request their GeoTIFF during the Aggregating phase and their GossipSub peer score is penalized. If the remaining committed nodes fall below the threshold $t$, the round fails early — saving all nodes the cost of the Aggregating phase.
+
+#### Phase 2 — Manifest Finalization (default: 300 seconds from round start)
+
+Within 300 seconds of the `DataRequest`, each node that published a valid Phase 1 `TlsCommitment` must complete the full pipeline and publish a final **`Manifest`** to `iris/observations/v1` containing `{request_id, image_hash, bounding_box, timestamp, tls_proof_hash, node_signature}`.
+
+This requires the node to finish downloading the full GeoTIFF payload, finalize the TLSNotary proof (Notary signs the complete transcript), and compute `BLAKE2b(payload)` to produce `image_hash`.
+
+**Why 300s:** At the minimum specified node connection (1 Gbps / 125 MB/s), a 16 GB payload takes ~130s to download plus ~24s to hash. 300s provides headroom for API transfer variability while bounding the maximum round duration. Operators on slower connections may raise this via `observation_window_seconds` in `iris.toml`.
+
+A Phase 1 node that fails to deliver its Phase 2 manifest by the 300s deadline is treated as a non-contributor: its slot is dropped from the aggregation pool and it incurs a GossipSub score penalty. If the remaining finalized manifests fall below $t$, the round fails at this point rather than proceeding to Aggregating with insufficient data.
+
+Full GeoTIFFs are never gossiped — only the lightweight `TlsCommitment` and `Manifest` messages transit GossipSub. The Leader pulls the actual payloads via direct libp2p streams during the Aggregating phase.
 
 ### 7.3 Aggregation & Proposal
 
@@ -1095,7 +1150,23 @@ flowchart TD
 Given the strict demands of the Iris Protocol to ingest and process satellite imagery at a nation-state resistant level, nodes require high-end prosumer hardware. Below are the estimated complexity and resource requirements for a single consensus round.
 
 ### 10.1 Cryptographic Compute (Hashing)
-The Iris Protocol natively uses **BLAKE2b** as its core hashing algorithm. When processing payloads up to 16 GB, cryptographic speed and nation-state resistance are equally critical. BLAKE2b was chosen over SHA-256 and SHA-512 because it provides 512-bit post-quantum security (unlike SHA-256's 128-bit quantum resistance), while significantly outperforming both SHA-512 and SHA-3 on 64-bit hardware. It also provides a higher security margin (more rounds) than BLAKE3.
+
+Iris uses two hash functions with deliberately separate roles:
+
+| Function | Used for | Rationale |
+|----------|----------|-----------|
+| **BLAKE2b-512** | `ContentHash` (GeoTIFF payloads), `ProofHash` (.tlsn files), local cache addressing | Bulk off-chain hashing of multi-GB payloads |
+| **Keccak-256** | Leader election seed `keccak256(block_hash ‖ request_id)` | Must be reproduced cheaply in EVM smart contracts |
+
+#### Why BLAKE2b-512 for bulk content
+
+Network transfer is the bottleneck in Iris, not hashing — so the decision trades raw throughput for **cryptanalytic security margin**. The candidates and why BLAKE2b wins:
+
+- **BLAKE3** is faster (~3–7 GB/s with SIMD parallelism) but uses only 7 mixing rounds, giving it a narrower cryptanalytic headroom. For satellite imagery that may be tampered with by nation-state adversaries using unknown future techniques, minimizing room for cryptanalysis matters more than extra throughput we don't need.
+- **SHA-256** (~1.5–2 GB/s with hardware acceleration) has maximum ecosystem maturity but provides a **128-bit pre-image security margin against Grover's algorithm** — the weakest long-term posture for archival panels that live permanently on-chain.
+- **Keccak-256 / SHA-3** is ~150–300 MB/s in software, which would make hashing — not network transfer — the bottleneck for 16 GB payloads. Disqualified on throughput.
+
+**BLAKE2b-512** runs at ~1 GB/s per core, uses **12 mixing rounds** (the widest cryptanalytic margin of the candidates), and provides a **256-bit pre-image security margin against Grover's algorithm** — twice that of SHA-256. It is battle-tested in WireGuard, Argon2, Zcash, and libsodium, and has over a decade of public cryptanalysis without a meaningful break.
 *   **Throughput:** A modern CPU core can hash data with BLAKE2b at roughly 800 MB/s to 1 GB/s.
 *   **Average Payload (1 GB):** Hashing a 1 GB GeoTIFF takes approximately **1 to 1.5 seconds**.
 *   **Maximum Payload (16 GB):** Hashing a 16 GB file takes roughly **16 to 24 seconds**.

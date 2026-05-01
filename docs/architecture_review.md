@@ -18,15 +18,15 @@ The critiques below are intended to take it from "excellent draft" to "audit-rea
 ### TODO
 - [ ] 2.1 Leader election is under-specified for adversarial analysis
 - [ ] 2.2 The verification shortcut in §7.4 has an acknowledged but unresolved attack vector
-- [ ] 2.3 The Notary Server in TLSNotary is a trust assumption that is never addressed
-- [ ] 2.4 DKG ceremony has no failure recovery specified
-- [ ] 2.5 Single-round execution limitation is stated but not defended
+- [x] 2.3 The Notary Server in TLSNotary is a trust assumption that is never addressed
+- [x] 2.4 DKG ceremony has no failure recovery specified
+- [x] 2.5 Single-round execution limitation is stated but not defended
 - [ ] 2.6 IPFS pinning is a liveness risk that is never addressed
 - [ ] 2.7 The Relayer trust model has a subtle gap
 - [ ] 2.8 Smart contract section (§8) is too thin relative to the rest
 - [x] 3.1 Inconsistent struct field naming conventions
-- [ ] 3.2 BLAKE2b security claim needs qualification
-- [ ] 3.3 The `serde-cbor` crate (§4.4, line 548) is unmaintained
+- [x] 3.2 BLAKE2b security claim needs qualification
+- [x] 3.3 The `serde-cbor` crate (§4.4, line 548) is unmaintained
 - [ ] 3.4 Several "magic numbers" lack justification
 - [ ] 3.5 Minor typo / grammar issues
 - [ ] 3.6 The `protocol_design.md` legacy document should be explicitly deprecated
@@ -64,37 +64,17 @@ This is a **real attack**: a colluding Leader + 1 node could submit that node's 
 1. Formally prove that sub-optimal selection within the threshold is harmless (i.e., the economic value of selecting image A vs. image B when both pass threshold is negligible), or
 2. Describe a mitigation — e.g., nodes could also verify against a random sample of other manifests, or the Leader could be required to publish the full similarity matrix for spot-checking.
 
-### 2.3 The Notary Server in TLSNotary is a trust assumption that is never addressed
+### ~~2.3 The Notary Server in TLSNotary is a trust assumption that is never addressed~~ ✅
 
-Section 5 and the sequence diagram (line 777) show a "Notary Server" as a separate participant. This is a critical trust dependency:
+Resolved — see [Completed Recommendations](#23-the-notary-server-in-tlsnotary-is-a-trust-assumption-that-is-never-addressed-1).
 
-- Who runs the Notary? Is it a peer node? A centralized service? The Iris Foundation?
-- What happens if the Notary is malicious or colluding with the Prover?
-- Is there a plan for decentralized notarization?
+### ~~2.4 DKG ceremony has no failure recovery specified~~ ✅
 
-**Recommendation:** Add a "§5.2 Notary Trust Model" subsection. At minimum, state whether the notary is (a) a centralized service (MVP), (b) another committee member (future), or (c) the user can choose from a set of approved notaries.
+Resolved — see [Completed Recommendations](#24-dkg-ceremony-has-no-failure-recovery-specified-1).
 
-### 2.4 DKG ceremony has no failure recovery specified
+### ~~2.5 Single-round execution limitation is stated but not defended~~ ✅
 
-The Committee Lifecycle diagram (§3.4, line 319) shows `DKGInProgress → PendingJoin : DKG fails (retry)`, but the document never describes:
-- What constitutes a DKG failure (e.g., a participant goes offline mid-ceremony)?
-- How many retries are allowed?
-- What happens if DKG never succeeds (does the committee remain at its old membership)?
-- Is there a timeout after which the pending node is dropped?
-
-**Recommendation:** Add a "DKG Failure Handling" paragraph after the Committee Lifecycle diagram.
-
-### 2.5 Single-round execution limitation is stated but not defended
-
-Line 189 states:
-
-> *"A node may only participate in a single round at a time to mitigate potential computation and networking bottlenecks."*
-
-This is a very strong constraint that directly affects throughput. If the average round takes 5–10 minutes (observation + transfer + normalization + voting), the network can only process 6–12 requests per hour.
-
-**Recommendation:** Either:
-1. Defend this constraint with concrete numbers (expected request volume vs. throughput), or
-2. Describe the upgrade path — e.g., pipelined rounds where observation for round N+1 overlaps with voting for round N.
+Resolved — see [Completed Recommendations](#25-single-round-execution-limitation-is-stated-but-not-defended-1).
 
 ### 2.6 IPFS pinning is a liveness risk that is never addressed
 
@@ -133,30 +113,26 @@ At only ~12 lines of prose (lines 876–883), §8 is dramatically under-specifie
 
 Resolved — see [Completed Recommendations](#31-inconsistent-struct-field-naming-conventions-1).
 
-### 3.2 BLAKE2b security claim needs qualification
+### ~~3.2 BLAKE2b security claim needs qualification~~ ✅
 
-Line 970 claims BLAKE2b provides "512-bit post-quantum security." This is an overstatement:
-- BLAKE2b produces a 512-bit digest, but Grover's algorithm reduces the pre-image security to ~256 bits against a quantum adversary.
-- The comparison "unlike SHA-256's 128-bit quantum resistance" is actually a point *in favor* of BLAKE2b, but the framing implies SHA-256 is weak when 128-bit quantum resistance is still considered very strong.
+Resolved — see [Completed Recommendations](#32-blake2b-security-claim-needs-qualification-1).
 
-**Recommendation:** Rephrase to: "BLAKE2b provides a 256-bit security margin against quantum pre-image attacks (Grover's), compared to SHA-256's 128-bit quantum margin."
+### ~~3.3 The `serde-cbor` crate (§4.4, line 548) is unmaintained~~ ✅
 
-### 3.3 The `serde-cbor` crate (§4.4, line 548) is unmaintained
-
-The document specifies `serde-cbor` for message serialization. This crate has been unmaintained since 2021. The maintained successor is [`ciborium`](https://crates.io/crates/ciborium).
-
-**Recommendation:** Update the reference to `ciborium`, or specify that the exact crate choice is deferred to implementation.
+Resolved — updated §4.4 Message Serialization to reference `ciborium` instead of `serde-cbor`, with a callout note explaining the swap. `ciborium` is the actively maintained successor and a drop-in replacement for the `serde` ecosystem.
 
 ### 3.4 Several "magic numbers" lack justification
 
-| Value | Where | Issue |
-|-------|-------|-------|
-| 30-second observation window | §7.2, line 850 | Why 30s? What if API latency exceeds this? |
-| $k = 20$ bucket size | §4.3.2, line 478 | Standard Kademlia default, fine, but worth noting |
-| $D = 6$ mesh degree | §4.4, line 528 | Justified well ✓ |
-| 120s message TTL | §4.4, line 533 | Why 120s? A round can last up to 3600s (GeoTIFF timeout). Stale messages from early phases would be dropped. |
+| Value | Where | Status |
+|-------|-------|--------|
+| ~~30-second observation window~~ | §7.2 | ✅ Resolved |
+| $k = 20$ bucket size | §4.3.2 | Standard Kademlia default, fine, but worth noting |
+| $D = 6$ mesh degree | §4.4 | Justified well ✓ |
+| 120s message TTL | §4.4 | Open — see below |
 
-**Recommendation:** Add brief rationale for the 30s window and 120s TTL, or note they are testnet-tunable defaults.
+**Observation window (resolved):** Replaced the single 30s window with a two-phase design — Phase 1 TLS Commitment deadline (60s) and Phase 2 Manifest Finalization deadline (300s from round start). See §7.2 and Completed Recommendations.
+
+**120s message TTL (open):** A round can last up to 3600s (GeoTIFF timeout). GossipSub messages published during Phase 1 of Observing will expire before the Leader enters Aggregating if the TTL is not raised. Needs to be addressed.
 
 ### 3.5 Minor typo / grammar issues
 
@@ -259,3 +235,55 @@ The Rust structs mixed raw `PeerId` and `Blake2bHash` across fields with differe
 | `ShareSecretKey` | `BlsSecretKeyShare` | A single node's BLS private key share |
 | `SharePublicKey` | `BlsPublicKeyShare` | A single node's BLS public key share |
 | `ThresholdSig` | `BlsSignature` | The final aggregated t-of-n BLS signature |
+
+### 2.3 The Notary Server in TLSNotary is a trust assumption that is never addressed
+
+§5.5 existed but stated "the Iris Foundation operates the approved Notaries" in the MVP row, which didn't reflect the actual design decision. The questions of who runs the notary, what happens on collusion, and the decentralization roadmap were unanswered.
+
+**Resolution:** Replaced the single-row mitigation table in §5.5 with a four-phase **Notary Trust Model** roadmap that encodes the explicit design decision:
+
+- **Phase 1 (MVP):** TLSNotary's hosted service (PSE/EF) — open-source, non-profit, third-party. Whitelist of approved public keys enforced on-chain.
+- **Phase 2 (Planned):** Iris Foundation-operated notary fleet with per-round notary diversity enforcement.
+- **Phase 3 (Future):** Permissionless staked Notary pool with slashing for provable misbehavior.
+- **Phase 4 (Research):** $k$-of-$m$ threshold notarization eliminating single-notary collusion entirely.
+
+The bottom-line callout explains why the MVP compromise is acceptable: notary can't read plaintext, can't forge proofs unilaterally, and BFT threshold absorbs a single colluding observation.
+
+### 2.4 DKG ceremony has no failure recovery specified
+
+The Committee Lifecycle diagram (§3.4) showed `DKGInProgress → PendingJoin : DKG fails (retry)`, but the document did not describe what constitutes a failure, the retry budget, the wall-clock timeout, or the fate of the pending node when retries are exhausted.
+
+**Resolution:** Added a **DKG Failure Handling** subsection after the Committee Lifecycle diagram in §3.4, and extended the state diagram with an explicit `DkgAborted` terminal state. The new prose specifies:
+
+- **Failure conditions** — per-round timeout (60s default), failed share verification, sub-threshold participation, or participant-set divergence.
+- **Retry policy** — up to 3 retries, bounded by a 15-minute wall-clock budget from governance approval.
+- **Permanent abort semantics** — prior committee retained (network keeps signing panels), pending node returned to the unstaked pool with no slash but forfeited gas, attributable misbehavior slashed per `threat_model.md`, one-epoch cooldown before the same candidate can retry.
+- **Liveness rationale** — the design explicitly favors safety: a wedged DKG cannot halt request processing, only stall committee membership churn.
+
+### 2.5 Single-round execution limitation is stated but not defended
+
+The original text stated the constraint without justification, leaving the throughput ceiling unexplained.
+
+**Resolution:** Updated the **Active Rounds** row in the §3.2 Node State table and the `NodeState` struct comment. The constraint is now framed as an **MVP implementation simplification** with two explicit rationales: (1) resource conservation — rounds compete for bandwidth during GeoTIFF transfer and CPU during normalization; (2) isolation — preventing one round's load from degrading another's timing. The text also clarifies that the constraint is not a protocol requirement: because rounds are fully independent (distinct request IDs, leaders, observation windows, and commits), a future upgrade can lift it to allow configurable concurrent round participation.
+
+### 3.2 BLAKE2b security claim needs qualification
+
+The original §10.1 claimed "512-bit post-quantum security" (overstatement — a 512-bit digest gives 256-bit pre-image margin under Grover's) and "unlike SHA-256's 128-bit quantum resistance" (misleading — 128-bit Grover margin is still computationally infeasible). The BLAKE3 comparison framed "more rounds" as the reason to prefer BLAKE2b, which is the wrong argument.
+
+**Resolution:** Rewrote §10.1 as a two-function hash strategy with a comparison table and explicit rationale:
+
+- **BLAKE2b-512** for all bulk off-chain content (`ContentHash`, `ProofHash`) — chosen for its 12-round cryptanalytic margin and **256-bit Grover pre-image margin**, not raw speed. BLAKE3 (7 rounds, 128-bit Grover) and SHA-256 (128-bit Grover) are disqualified on security margin; Keccak-256 is disqualified on throughput (~150–300 MB/s makes hashing the bottleneck for 16 GB payloads).
+- **Keccak-256** for the leader-election seed — EVM-native precompile, cheap on all target chains, input is always ~64 bytes so throughput is irrelevant.
+
+This also resolves the "hash function not specified" sub-point of item 2.1 for the leader-election formula.
+
+### 3.4.a Observation window (30s) lacked justification
+
+The original 30s window predated the payload size requirements being fully specified. As shown in the analysis, 30s only covers sub-1 GB payloads on a 1 Gbps connection hitting a fast API — it fails for the documented 1–16 GB range on any realistic connection.
+
+**Resolution:** Replaced the single 30s window with a **two-phase observation design** in §7.2, the §3.1 Observing state definition, and the `Round` struct:
+
+- **Phase 1 — TLS Commitment (60s):** Node must initiate TLSNotary MPC session, complete TLS handshake with Data Provider, and publish a lightweight `TlsCommitment` to `iris/observations/v1`. Covers API authentication latency (5–30s) + Notary MPC setup. Nodes missing this deadline are excluded immediately — the Leader knows early who is participating before any GeoTIFF transfers begin.
+- **Phase 2 — Manifest Finalization (300s from round start):** Node must complete the full download, finalize the `.tlsn` proof, compute `BLAKE2b(payload)`, and publish the final `Manifest`. 300s covers a 16 GB payload at 1 Gbps (~130s download + ~24s hash) with headroom for transfer variability. Configurable via `observation_window_seconds` in `iris.toml`.
+
+The two-phase design enables **early round failure**: if fewer than $t$ nodes deliver Phase 1 commitments, the round aborts at 60s without any GeoTIFF downloading. If Phase 2 drops below threshold, it aborts at 300s before the expensive Aggregating phase begins.
