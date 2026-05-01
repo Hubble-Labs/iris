@@ -22,14 +22,14 @@ The critiques below are intended to take it from "excellent draft" to "audit-rea
 - [x] 2.4 DKG ceremony has no failure recovery specified
 - [x] 2.5 Single-round execution limitation is stated but not defended
 - [ ] 2.6 IPFS pinning is a liveness risk that is never addressed
-- [ ] 2.7 The Relayer trust model has a subtle gap
+- [x] 2.7 The Relayer trust model has a subtle gap
 - [ ] 2.8 Smart contract section (§8) is too thin relative to the rest
 - [x] 3.1 Inconsistent struct field naming conventions
 - [x] 3.2 BLAKE2b security claim needs qualification
 - [x] 3.3 The `serde-cbor` crate (§4.4, line 548) is unmaintained
-- [ ] 3.4 Several "magic numbers" lack justification
-- [ ] 3.5 Minor typo / grammar issues
-- [ ] 3.6 The `protocol_design.md` legacy document should be explicitly deprecated
+- [x] 3.4 Several "magic numbers" lack justification
+- [x] 3.5 Minor typo / grammar issues
+- [x] 3.6 The `protocol_design.md` legacy document should be explicitly deprecated
 - [ ] 4. Missing Sections (Error handling, Versioning, Observability, Testing, Multi-chain)
 
 ---
@@ -85,14 +85,9 @@ Section 3.3 (line 259–264) and §7.3 rely on the Leader pinning to IPFS. But:
 
 **Recommendation:** Add a "§3.3.1 Storage Persistence & Pinning Strategy" section addressing long-term availability guarantees.
 
-### 2.7 The Relayer trust model has a subtle gap
+### ~~2.7 The Relayer trust model has a subtle gap~~ ✅
 
-Section 1.2 (line 48) correctly states the Relayer "cannot forge consensus." But there is a **liveness attack**: a malicious Relayer could simply *refuse* to relay — either dropping requests from the chain or withholding finalized reports. The document doesn't address:
-- Can multiple Relayers compete?
-- Is there a timeout after which anyone can relay?
-- What incentivizes the Relayer not to censor specific requests?
-
-**Recommendation:** Expand the Relayer trust model to cover liveness, not just safety.
+Resolved — see [Completed Recommendations](#27-the-relayer-trust-model-has-a-subtle-gap-1).
 
 ### 2.8 Smart contract section (§8) is too thin relative to the rest
 
@@ -128,29 +123,19 @@ Resolved — updated §4.4 Message Serialization to reference `ciborium` instead
 | ~~30-second observation window~~ | §7.2 | ✅ Resolved |
 | $k = 20$ bucket size | §4.3.2 | Standard Kademlia default, fine, but worth noting |
 | $D = 6$ mesh degree | §4.4 | Justified well ✓ |
-| 120s message TTL | §4.4 | Open — see below |
+| ~~120s message TTL~~ | §4.4 | ✅ Resolved |
 
 **Observation window (resolved):** Replaced the single 30s window with a two-phase design — Phase 1 TLS Commitment deadline (60s) and Phase 2 Manifest Finalization deadline (300s from round start). See §7.2 and Completed Recommendations.
 
-**120s message TTL (open):** A round can last up to 3600s (GeoTIFF timeout). GossipSub messages published during Phase 1 of Observing will expire before the Leader enters Aggregating if the TTL is not raised. Needs to be addressed.
+**Message TTL (resolved):** Raised the GossipSub message TTL from 120s to 600s in both the §4.4 mesh parameter table and the `iris.toml` example. Sized to comfortably outlast the Phase 2 manifest deadline (300s) with 2× headroom, ensuring manifests published early in Observing remain forwardable until the Leader transitions to Aggregating.
 
-### 3.5 Minor typo / grammar issues
+### ~~3.5 Minor typo / grammar issues~~ ✅
 
-| Line | Issue |
-|------|-------|
-| 48 | "It merely transports cryptographically verifiable messages." — the antecedent of "It" is ambiguous (Relayer? intercepted data?) |
-| 520 | "~20 GB of total network traffic per observation per node" — should this be "per round" instead of "per observation"? |
-| 970 | "it also provides a higher security margin (more rounds) than BLAKE3" — "rounds" here refers to hash rounds, but could be confused with consensus rounds |
+Resolved — see [Completed Recommendations](#35-minor-typo--grammar-issues-1).
 
-### 3.6 The `protocol_design.md` legacy document should be explicitly deprecated
+### ~~3.6 The `protocol_design.md` legacy document should be explicitly deprecated~~ ✅
 
-`protocol_design.md` still contains the legacy SIFT-based consensus (§4) and an older lifecycle description that conflicts with `architecture.md`. New readers may be confused about which is canonical.
-
-**Recommendation:** Add a deprecation notice at the top of `protocol_design.md`:
-```markdown
-> [!WARNING]
-> This document is superseded by [architecture.md](./architecture.md). Retained for historical context only.
-```
+Resolved — `protocol_design.md` has been removed from the repository, so there is no longer a stale legacy document for new readers to confuse with `architecture.md`.
 
 ---
 
@@ -168,12 +153,12 @@ Resolved — updated §4.4 Message Serialization to reference `ciborium` instead
 
 ## Summary
 
-| Category | Count | Highlights |
-|----------|-------|------------|
-| **Structural** | 5 | Add ToC, reduce redundancy between §3.1/§5/§9, add non-goals |
-| **Technical** | 8 | Leader failure recovery, Notary trust, IPFS persistence, Relayer liveness, expand §8 |
-| **Polish** | 6 | BLAKE2b claim, unmaintained crate, magic numbers, deprecate `protocol_design.md` |
-| **New sections** | 5 | Error handling, versioning, observability, testing, multi-chain |
+| Category | Open | Total | Highlights of remaining work |
+|----------|------|-------|------------------------------|
+| **Structural** | 0 | 5 | *(all resolved)* |
+| **Technical** | 4 | 8 | Leader failure recovery (2.1), verification shortcut (2.2), IPFS persistence (2.6), expand §8 smart contract spec (2.8) |
+| **Polish** | 0 | 6 | *(all resolved)* |
+| **New sections** | 5 | 5 | Error handling, versioning, observability, testing, multi-chain |
 
 The document's greatest strength is its pedagogical layering — the geodesic model → state machine → network → provenance → consensus progression reads naturally and builds understanding incrementally. The primary area for improvement is closing the gap between the *descriptive* sections (which are excellent) and the *specification* sections (which need more edge-case coverage to be implementation-ready).
 
@@ -208,7 +193,7 @@ The architecture describes what the system *does* but never explicitly states wh
 - Does Iris handle authentication of Data Provider API access, or is that the operator's responsibility?
 - Can Iris serve historical panels on-demand, or only respond to live requests?
 
-**Recommendation:** Add a brief "§1.3 Non-Goals & Scope Boundaries" subsection under the System Overview.
+**Recommendation:** Add a brief "§1.4 Non-Goals & Scope Boundaries" subsection under the System Overview.
 
 ### 1.5 Missing cross-links to sibling documents
 
@@ -218,6 +203,8 @@ The document links to `data_normalization.md` once (line 828) but never referenc
 - [whitepaper.md](./whitepaper.md) — which provides higher-level motivational context
 
 **Recommendation:** Add a "Related Documents" section or a brief header note listing the companion docs and their relationship to this spec (e.g., "supersedes `protocol_design.md` §4").
+
+**Resolution:** Added a "Related Documents" table near the top of `architecture.md` listing the four companion docs and their relationship to the spec. Subsequent work has substantially deepened the cross-link to `threat_model.md`: a new §1.3 Trust Model in `architecture.md` consolidates per-actor trust assumptions in a single hub table and back-links from §3.4, §5.5, and §8.1; `threat_model.md` was simultaneously rewritten from a 45-line sketch into a structured per-layer threat catalog (Network / Provenance / Consensus / Settlement) with a Slashing Catalog tracking both confirmed and proposed offenses. The user-authored land-ownership brainstorming was preserved in `threat_model.md` Appendix A under an explicit out-of-scope label. The cross-link from `architecture.md` to `threat_model.md` is now substantive in both directions rather than a pointer to a sketch.
 
 ### 3.1 Inconsistent struct field naming conventions
 
@@ -287,3 +274,39 @@ The original 30s window predated the payload size requirements being fully speci
 - **Phase 2 — Manifest Finalization (300s from round start):** Node must complete the full download, finalize the `.tlsn` proof, compute `BLAKE2b(payload)`, and publish the final `Manifest`. 300s covers a 16 GB payload at 1 Gbps (~130s download + ~24s hash) with headroom for transfer variability. Configurable via `observation_window_seconds` in `iris.toml`.
 
 The two-phase design enables **early round failure**: if fewer than $t$ nodes deliver Phase 1 commitments, the round aborts at 60s without any GeoTIFF downloading. If Phase 2 drops below threshold, it aborts at 300s before the expensive Aggregating phase begins.
+
+### 3.4.b 120s message TTL was too short for the round timeline
+
+A round's Observing phase now extends to 300s (Phase 2 deadline), and a manifest published at $t = 5$s would expire at $t = 125$s — well before the Leader transitions to Aggregating. This left a real gap where late-joining mesh peers could fail to receive valid manifests.
+
+**Resolution:** Raised `message_ttl_seconds` from 120s to 600s in both the §4.4 mesh parameter table and the `[network.gossipsub]` section of the `iris.toml` example. The new value gives 2× headroom over the 300s Phase 2 deadline, covering clock skew and slow propagation paths without retaining stale messages long enough to materially burden the mesh cache.
+
+### 3.5 Minor typo / grammar issues
+
+Three small fixes:
+
+- **§1.2 Relayer description (formerly line 48):** "It merely transports cryptographically verifiable messages." → "The Relayer merely transports cryptographically verifiable messages." Disambiguates the antecedent (was unclear whether "It" referred to the Relayer or the intercepted data).
+- **§4.4 Critical design decision callout (formerly line 520):** "~20 GB of total network traffic per observation per node" → "~20 GB of redundant network traffic per round." The original phrasing double-counted the units; "per round" is the correct framing.
+- **§10.1 BLAKE3 comparison (formerly line 970):** No change needed — the §10.1 rewrite from item 3.2 already disambiguates with the explicit phrase "12 mixing rounds" / "7 mixing rounds," eliminating any confusion with consensus rounds.
+
+### 3.6 `protocol_design.md` deprecation
+
+The legacy `protocol_design.md` file (which contained the superseded SIFT-based consensus design) has been removed from the repository. New readers can no longer confuse it with `architecture.md`, so the proposed deprecation banner is moot.
+
+### 2.7 The Relayer trust model has a subtle gap
+
+The original §1.2 Relayer description correctly established **safety** (a Relayer cannot forge consensus because it lacks $t$-of-$n$ BLS shares), but it overclaimed "completely trustless" and left a real **liveness gap**: a malicious or unavailable Relayer can censor by silent drop — refusing to forward `DataRequest` events inbound, or withholding finalized reports outbound. The document did not specify whether multiple Relayers could compete, whether a timeout fallback existed, or what incentivized non-censorship.
+
+**Resolution:** Reframed §1.2 to separate **Safety** and **Liveness** explicitly, and added a new §8.1 "Relayer Trust Model & Phase Roadmap" mirroring the §5.5 Notary roadmap structure. Key design choices:
+
+- **Reputation-gated opt-in role.** The Relayer is now a sub-role atop a regular Iris node, identified at the network layer by `PeerId` but **gated economically by the operator's on-chain staking address**. Binding to the staking address (rather than `PeerId` alone) prevents reputation transfer via libp2p keypair sale — an attacker would have to acquire the underlying stake too, preserving the opportunity-cost argument against grinding.
+- **Reputation inputs documented; formula deferred.** Inputs include stake-time, successful round contributions (Phase 1 commitment + Phase 2 manifest + Leader-attested BLSShare), DKG participations, and uptime; penalties include slashing events, missed rounds, and decay over inactive periods. Concrete weights, decay constants, and the threshold value live in a separate tokenomics/governance document and are governance-tunable per epoch.
+- **Off-chain reputation, on-chain Merkle root commit.** The active committee periodically commits a Merkle root of `(staking_address, reputation_score)` to `IrisVerifier` via the existing $t$-of-$n$ threshold signature. Relayers submit Merkle proofs alongside `deliverReport` calls. This reuses the existing committee-signed root-of-trust — no new cryptography, no new trust assumption.
+- **Censorship fallback via on-chain timeout.** `IrisVerifier` tracks `requestSubmissionDeadline[requestId] = blockTimestamp + T1`, with `T1 ≈ 600s` (twice the Phase 2 manifest deadline). After the deadline, any reputation-qualified address may submit, regardless of phase.
+- **Three-phase decentralization roadmap** (parallel to §5.5 in shape but explicitly three phases — VRF-routed assignment was judged too speculative for the architecture spec):
+  - **Phase 1 (MVP):** Iris Foundation operates the sole Relayer; on-chain allowlist of one. Honestly framed as a liveness compromise (not a solution), mitigated by multi-region deployment + uptime SLA. Timeout fallback disabled because no reputation set yet exists.
+  - **Phase 2 (Planned):** Foundation Relayer + opt-in reputation-gated Relayers compete; timeout fallback to Foundation activates.
+  - **Phase 3 (Future):** Foundation steps away; permissionless above the reputation threshold.
+- **Trust assumption monotonicity.** Across all three phases, **safety is unchanged** — only liveness varies. Phase 1: Foundation honesty + uptime. Phase 2: Foundation OR ≥1 honest reputable Relayer. Phase 3: ≥1 honest reputable Relayer. Trust assumptions strictly weaken across phases.
+
+The full smart contract interface (function signatures, events, errors, gas accounting) is explicitly deferred to review item 2.8; §8 only adds a minimal hook listing the new `IrisVerifier` state (`foundationRelayer`, `relayerReputationRoot`, `requestSubmissionDeadline`).

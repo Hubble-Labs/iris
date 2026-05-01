@@ -7,7 +7,8 @@ This document defines the architecture of the Iris Protocol, a proprietary, stan
 - [1. System Overview: The Chain of Provenance](#1-system-overview-the-chain-of-provenance)
   - [1.1 The Provenance Pipeline](#11-the-provenance-pipeline)
   - [1.2 System Actors](#12-system-actors)
-  - [1.3 Non-Goals & Scope Boundaries](#13-non-goals--scope-boundaries)
+  - [1.3 Trust Model](#13-trust-model)
+  - [1.4 Non-Goals & Scope Boundaries](#14-non-goals--scope-boundaries)
 - [2. The Geodesic Reconstruction Model](#2-the-geodesic-reconstruction-model)
   - [2.1 The Analogy: A Sphere of Flat Panels](#21-the-analogy-a-sphere-of-flat-panels)
   - [2.2 Why This Analogy Matters](#22-why-this-analogy-matters)
@@ -43,6 +44,7 @@ This document defines the architecture of the Iris Protocol, a proprietary, stan
   - [7.4 Verification & Signing](#74-verification--signing)
   - [7.5 Threshold Cryptography](#75-threshold-cryptography)
 - [8. Smart Contract Integration](#8-smart-contract-integration)
+  - [8.1 Relayer Trust Model & Phase Roadmap](#81-relayer-trust-model--phase-roadmap)
 - [9. How the Layers Connect — A Full Request Walkthrough](#9-how-the-layers-connect--a-full-request-walkthrough)
 - [10. System Complexity and Compute Requirements](#10-system-complexity-and-compute-requirements)
   - [10.1 Cryptographic Compute (Hashing)](#101-cryptographic-compute-hashing)
@@ -58,7 +60,7 @@ This document defines the architecture of the Iris Protocol, a proprietary, stan
 | [Whitepaper](./whitepaper.md) | High-level vision and motivation. This architecture doc is the technical realization of the whitepaper's goals |
 | [Data Normalization Specification](./data_normalization.md) | Complete mathematical formulation of the tensor metrics summarized in §6 |
 | [Implementation Plan](./implementation_plan.md) | Phased engineering breakdown that maps directly to the layers defined in §3 |
-| [Threat Model](./threat_model.md) | Adversarial analysis and penalty mechanics referenced in §7 and §8 |
+| [Threat Model](./threat_model.md) | Companion threat catalog to [§1.3 Trust Model](#13-trust-model) — per-layer attack analysis, mitigations, and slashing rules |
 
 ---
 
@@ -99,15 +101,93 @@ flowchart LR
 
 ### 1.2 System Actors
 
-Entities in the Iris network participate in one or more of the following roles:
+Entities in the Iris network participate in one or more of the following roles. This section defines *what each actor does*; [§1.3 Trust Model](#13-trust-model) defines *what we trust them to do* and what happens when that trust is violated.
 
-* **Regular Node**: An active committee member that fetches imagery from **Data Providers**, generates TLS provenance proofs, independently verifies leader proposals alongside other nodes, and provides BLS signature shares during final consensus.
-* **Leader Node**: A committee member deterministically elected for a specific round to collect manifests, retrieve full imagery payloads via secure Noise streams, run the normalization pipeline, propose the Average Scenario, and aggregate BLS signatures.
-* **Relayer**: An off-chain service responsible for bridging communication between the host blockchain and the Iris network. It listens for `DataRequest` events on-chain and broadcasts them to the Iris network, and takes finalized panels to submit them back to the smart contract. **Trust Model & Incentives**: The Relayer is incentivized by a portion of the Requester's fee to cover gas costs. It is completely trustless and cannot forge consensus. Even if a Relayer intercepts the data and computes its own "Average Scenario", it cannot deliver it on-chain because it does not possess the $t$-of-$n$ BLS private key shares required to generate a valid committee threshold signature. It merely transports cryptographically verifiable messages.
-* **Data Provider**: External commercial satellite imagery providers (e.g., Maxar, Planet Labs, Sentinel) that supply the raw geospatial data via HTTPS APIs.
-* **Requester**: Decentralized applications (dapps) or smart contracts on a host blockchain that request satellite data and consume the finalized, verifiable panels.
+#### Regular Node
 
-### 1.3 Non-Goals & Scope Boundaries
+An active committee member that forms the trust backbone of the Iris network. Regular Nodes independently observe satellite imagery, generate cryptographic provenance proofs, and provide BLS signature shares during consensus.
+
+- **Responsibilities:** Fetch imagery from assigned Data Providers for each round; generate a `.tlsn` TLSNotary proof attesting the authenticity of the TLS session; produce a `Manifest` containing the BLAKE2b image hash and metadata; independently verify the Leader's proposed medoid against their own observation; cast a BLS signature share on accepted proposals.
+- **Protocol interactions:** [§5 — Data Provenance](#5-data-provenance--ingestion) (TLSNotary proof generation); [§6 — Normalization Engine](#6-data-normalization-engine-the-reconstruction-pipeline) (proposal verification); [§7.4 — Verification & Signing](#74-verification--signing) (BLS share contribution); [§3.4 — Committee State](#34-layer-4--committee-state-network-wide-slow-moving) (staking, DKG participation).
+- **Incentive structure:** Staking-gated — nodes must stake via `IrisStaking` to join the committee and receive a share of the request fee proportional to participation. Misbehavior is penalized via on-chain slashing.
+- **Architectural constraints:** Cannot forge consensus unilaterally. The $t$-of-$n$ threshold signature requires agreement from $t > \lfloor 2n/3 \rfloor$ committee members. TLS proof forgery is cryptographically infeasible without the Notary's MPC co-signature.
+
+#### Leader Node
+
+A Regular Node elected by a deterministic, per-round formula to serve as the round's aggregator and proposal authority. Leadership is a rotating duty — a Leader Node carries all responsibilities of a Regular Node plus the aggregation role.
+
+- **Responsibilities:** Collect `Manifest` messages from committee members over the observation window; retrieve full GeoTIFF payloads from Data Providers via Noise-encrypted direct streams; run the normalization pipeline to compute pairwise similarity scores and select the medoid (Average Scenario); broadcast the proposal to the committee; aggregate valid BLS shares into the round's threshold signature.
+- **Protocol interactions:** [§7.1 — Leader Election](#71-leader-election); [§7.2 — Observation Window](#72-observation-window); [§7.3 — Aggregation & Proposal](#73-aggregation--proposal); [§7.4 — Verification & Signing](#74-verification--signing); [§4.5 — GeoTIFF Transfer Protocol](#45-direct-streams--geotiff-transfer-protocol); [§6 — Normalization Engine](#6-data-normalization-engine-the-reconstruction-pipeline).
+- **Incentive structure:** Same staking and fee-share model as Regular Nodes. No special per-round bonus — leadership is a rotating duty enforced by the deterministic election formula.
+- **Architectural constraints:** The Leader's proposal is independently verified by every Regular Node before any BLS share is cast. A dishonest Leader cannot force acceptance of a false medoid without corrupting at least $t$ committee members. The deterministic election formula ([§7.1](#71-leader-election)) prevents self-nomination and persistent leadership capture.
+
+#### Notary
+
+An external MPC participant that co-signs TLS session transcripts to make them verifiable by third parties. The Notary never sees plaintext data — its contribution is a cryptographic co-signature that binds the `.tlsn` proof to a specific session between a known Data Provider and the Prover.
+
+- **Responsibilities:** Participate in the TLSNotary two-party MPC protocol with a Prover (Regular Node) acting as the Verifier; co-sign the TLS session transcript; publish its public key for downstream proof verification.
+- **Protocol interactions:** [§5.2 — TLSNotary MPC](#52-tlsnotary-mpc-based-proof-of-origin); [§5.3 — Proof Anatomy](#53-anatomy-of-a-tlsn-proof); [§5.4 — Proof Verification](#54-proof-verification); [§5.5 — Trust Assumptions & the Notary](#55-trust-assumptions--the-notary).
+- **Incentive structure:** Phase 1–2: Foundation-operated (governance incentive, no token reward). Phase 3+: permissioned operator pool with staking-backed accountability. See [§5.5](#55-trust-assumptions--the-notary) for the full decentralization roadmap.
+- **Architectural constraints:** The MPC split ensures the Notary never holds the Data Provider's TLS session keys. A Notary can attest to the *fact* of a TLS session but cannot alter or fabricate the response payload. Collusion between a Notary and a Prover is the primary residual risk; see [§5.5](#55-trust-assumptions--the-notary).
+
+#### Relayer
+
+An opt-in, reputation-gated transport role that bridges the host blockchain and the Iris network. The Relayer is an overlay responsibility that node operators with sufficiently high reputation scores may assume — it is distinct from, but built on top of, the Regular Node role.
+
+- **Responsibilities:** Monitor the host blockchain for `DataRequest` events and broadcast them to the Iris GossipSub mesh; receive finalized panel reports from the Iris network and submit them on-chain to `IrisVerifier`; cover gas costs from relay-fee revenue.
+- **Protocol interactions:** [§8 — Smart Contract Integration](#8-smart-contract-integration); [§8.1 — Relayer Trust Model & Phase Roadmap](#81-relayer-trust-model--phase-roadmap); [§4.4 — GossipSub](#44-message-propagation-gossipsub-v11) (inbound broadcast); [§3.2 — Node State](#32-layer-2--node-state-persistent-per-node) (reputation score).
+- **Incentive structure:** Relay-fee revenue (a portion of the Requester's fee allocated to cover on-chain gas plus a profit margin). The reputation threshold creates a costly barrier to entry, aligning the Relayer's long-term interests with honest operation.
+- **Architectural constraints:** **Safety** — A Relayer cannot forge consensus. Without the $t$-of-$n$ BLS private key shares it cannot produce a valid committee threshold signature; it merely transports cryptographically verifiable messages. **Liveness** — A censoring Relayer can drop events or withhold reports, but the on-chain timeout fallback (`requestSubmissionDeadline`) limits the damage window. See [§8.1](#81-relayer-trust-model--phase-roadmap).
+
+#### Data Provider
+
+External commercial satellite imagery providers (Maxar, Planet Labs, Sentinel, and similar) that serve the raw geospatial data consumed by Regular Nodes. Data Providers are not Iris network participants — they are external services whose outputs are made trustworthy by the provenance pipeline.
+
+- **Responsibilities:** Serve satellite imagery over HTTPS/TLS in response to authenticated API requests from node operators; maintain stable hostnames and valid TLS certificate chains that TLSNotary proofs can reference.
+- **Protocol interactions:** [§5 — Data Provenance](#5-data-provenance--ingestion) (TLS session subject); [§5.2 — TLSNotary MPC](#52-tlsnotary-mpc-based-proof-of-origin) (session counterparty); [§6 — Normalization Engine](#6-data-normalization-engine-the-reconstruction-pipeline) (raw imagery source).
+- **Incentive structure:** Standard commercial API subscriptions managed individually by node operators. The Iris protocol does not broker or subsidize provider access.
+- **Architectural constraints:** Iris trusts only the TLS-attested *fact of delivery*, not pixel content. A dishonest or compromised Provider's responses are filtered by the consensus medoid — outlier images are rejected by the similarity threshold before any BLS share is cast.
+
+#### Requester
+
+Decentralized applications (dapps) or smart contracts on a host blockchain that initiate the protocol by submitting `DataRequest` transactions and consume the resulting verified panels.
+
+- **Responsibilities:** Construct and submit a `DataRequest` on-chain specifying an Area of Interest (AoI), a timestamp, and the request fee; retrieve the finalized panel from IPFS using the CID recorded on-chain; verify the BLS threshold signature against the `IrisVerifier` aggregate public key.
+- **Protocol interactions:** [§8 — Smart Contract Integration](#8-smart-contract-integration) (request submission and panel retrieval); [§7.5 — Threshold Cryptography](#75-threshold-cryptography) (BLS signature verification); [§3.3 — Panel State](#33-layer-3--panel-state-the-reconstruction-output) (finalized panel format).
+- **Incentive structure:** The Requester pays the request fee to fund node operator rewards and Relayer gas reimbursement. Correct fee payment is a precondition for the request being processed.
+- **Architectural constraints:** No influence over consensus, leader election, or panel content beyond the AoI and timestamp parameters. A dishonest Requester can submit malformed or duplicate requests; on-chain validation rejects them without disrupting the network.
+
+### 1.3 Trust Model
+
+§1.2 defines the actors and their protocol roles; this section defines *what we trust them to do*. Iris is a Byzantine Fault Tolerant network — no single actor is assumed honest, but the protocol does rely on a small set of explicit trust assumptions to function. The table below enumerates, for each actor, what we rely on them to do, what we explicitly do not trust them with, and what happens when that trust is violated. The companion document [`threat_model.md`](./threat_model.md) catalogs the *attacks* against these assumptions and the corresponding mitigations.
+
+| Actor | Trusted to do | Not trusted to do | Consequence of misbehavior | Deep-dive |
+|-------|---------------|-------------------|----------------------------|-----------|
+| **Requester** | Pay the request fee; provide a valid AoI / timestamp pair on-chain | Influence consensus, leader election, or panel content beyond the request parameters | Request stalls or is rejected on-chain; no slashing (Requester holds no stake) | [§1.2](#12-system-actors) |
+| **Data Provider** | Serve imagery over TLS using a stable hostname, with a valid TLS certificate chain | Be honest about pixel content — only the TLS-attested *fact of delivery* is trusted; pixel-level lies are filtered by the consensus medoid | None directly (Provider is external); systematically anomalous Providers are excluded from future round queries by operators | [§5](#5-data-provenance--ingestion) |
+| **Notary** † | Co-sign a TLS transcript attesting session authenticity (so a third party can verify the Prover talked to the named Provider) | Read plaintext (MPC keeps keys split); forge proofs unilaterally; censor selectively at scale (Phase 3+ slashing applies) | Whitelist-key removal (Phase 1–2); slashing for provable collusion (Phase 3+) | [§5.5](#55-trust-assumptions--the-notary) |
+| **Regular Node** | Honestly observe imagery; produce a valid `.tlsn` proof; submit a `Manifest`; cast a BLSShare on accepted proposals | Forge consensus alone; equivocate; submit data anomalous to the medoid | Stake slashed for invalid TLS proof, anomalous data, or attributable DKG misbehavior | [§3.4](#34-layer-4--committee-state-network-wide-slow-moving), [threat_model.md §Slashing](./threat_model.md#5-slashing-catalog) |
+| **Leader Node** | Aggregate manifests; run the normalization pipeline; propose the medoid (Average Scenario); aggregate $t$ valid BLS shares | Forge consensus alone (each Regular Node independently re-verifies the proposal); withhold a successful proposal indefinitely | Round fails (no proposal advances → re-elect or timeout); attributable misbehavior is slashable | [§7.1](#71-leader-election)–[§7.4](#74-verification--signing) |
+| **Relayer** † | Transport `DataRequest` events on-chain → off-chain and finalized panels off-chain → on-chain | Forge consensus; alter the CID or signature payload; fabricate a `DataRequest` | Lost relay-fee revenue; reputation decay; underlying stake slashable for attributable censorship (proposed — see [threat_model.md §Slashing](./threat_model.md#5-slashing-catalog)) | [§8.1](#81-relayer-trust-model--phase-roadmap) |
+| **Committee (collective)** | Maintain BFT honest majority $f < n/3$; produce valid $t$-of-$n$ threshold signatures; commit the reputation Merkle root | Be individually honest — only the *collective* threshold is assumed; any individual member may be Byzantine | Network-wide failure mode if violated: $f \geq n/3$ enables safety violations (forged panels, equivocation); detected after the fact via on-chain signature verification | [§3.4](#34-layer-4--committee-state-network-wide-slow-moving) |
+| **Iris Foundation** † | Operate the Phase 1 Relayer ([§8.1](#81-relayer-trust-model--phase-roadmap)) and Phase 2 Notary fleet ([§5.5](#55-trust-assumptions--the-notary)); steward governance until decentralization completes | Override consensus; hold BLS key shares; modify finalized on-chain panels | Reputational damage and governance pressure; phase roadmaps progressively reduce dependency to zero | [§5.5](#55-trust-assumptions--the-notary), [§8.1](#81-relayer-trust-model--phase-roadmap) |
+
+> **†** Trust state shown reflects the current Phase 1 / MVP. The Notary, Relayer, and Foundation rows all evolve under phased decentralization roadmaps that monotonically *weaken* their trust requirements over time. See [§5.5](#55-trust-assumptions--the-notary) (Notary) and [§8.1](#81-relayer-trust-model--phase-roadmap) (Relayer) for the complete phase progressions.
+
+#### Aggregate Trust Assumptions
+
+A handful of cross-cutting invariants underpin the per-actor trust grants above. These are *network-wide* assumptions, not properties of any single actor:
+
+* **BFT honest majority** — Fewer than $n/3$ of the active committee is malicious at any given time. This is the foundational safety assumption; if violated, the threshold signature can no longer be trusted to represent committee consensus.
+* **DKG security** — At least $t$ honest participants are present and correct at every committee DKG ceremony (per [§3.4](#34-layer-4--committee-state-network-wide-slow-moving)). A successful DKG is a precondition for a usable aggregate key.
+* **Notary non-collusion** — Phase-dependent. The exact assumption (single trusted operator → operator pool → permissionless pool → threshold MPC) is enumerated in [§5.5](#55-trust-assumptions--the-notary).
+* **At-least-one-honest-Relayer** — Required for liveness. Phase-dependent; see [§8.1](#81-relayer-trust-model--phase-roadmap). Note this is *one*, not a majority — any single honest Relayer above the reputation threshold is sufficient to keep the network responsive.
+* **Host-chain safety and finality** — Iris assumes the host blockchain (Ethereum, Polygon, etc.) provides standard finality guarantees. Reorg-resistance, event-log accuracy, and precompile availability (EIP-2537) are out of scope and outside Iris's trust boundary.
+* **Governance and upgrade trust** — The mechanism by which the on-chain `IrisVerifier` aggregate key, threshold value, and committee membership are updated is *deferred to a future governance specification*. Until that specification lands, Foundation-stewarded governance is part of the Phase 1 trust footprint.
+
+> **Threat Analysis:** The trust assumptions above are not self-enforcing — each one is a target. Sybil and eclipse attacks try to undermine the GossipSub mesh and Kademlia DHT; a colluding Notary and Prover can co-sign a fabricated transcript; a Byzantine Leader can equivocate or propose a sub-optimal medoid; the DKG ceremony can be sabotaged; a censoring Relayer can stall liveness even though it cannot break safety. See [`threat_model.md`](./threat_model.md) for the full per-layer attack catalog, mitigation analysis, and slashing rules.
+
+### 1.4 Non-Goals & Scope Boundaries
 
 To prevent misinterpretation of the protocol's capabilities, the following are explicitly **out of scope** for the Iris architecture as specified in this document:
 
@@ -209,7 +289,7 @@ stateDiagram-v2
 | **Aggregating** | **Leader Node** only | The **Leader Node** collects all manifests from `iris/observations/v1`. For each manifest, the **Leader Node** requests the full GeoTIFF payload via a direct libp2p stream (the Bitswap-like transfer protocol). Once all payloads are retrieved, the **Leader Node** runs the full normalization pipeline: orthorectification → similarity metrics ($\mu_1$, $\mu_2$, $\mu_3$) → exponential decay scoring $\mathcal{S}(\mu)$ → pairwise similarity matrix → Average Scenario selection. The **Leader Node** tracks: the similarity matrix, the selected Average Scenario tensor, and its corresponding image hash. | The **Leader Node** has computed the Average Scenario and pinned it to IPFS, obtaining a CID. |
 | **Pre-Commit** | **Leader Node** broadcasts, all **Regular Nodes** listen | The **Leader Node** publishes a `Proposal` message to `iris/consensus/v1` containing: `{request_id, selected_image_hash, ipfs_cid, similarity_matrix_summary, leader_signature}`. Each **Regular Node** independently verifies the proposal by: (1) checking the TLS proof for the selected image, (2) fetching the proposed GeoTIFF via libp2p stream, (3) re-running the tensor normalization pipeline locally to confirm the similarity scores, and (4) verifying the IPFS CID matches. The node tracks: verification result (accept/reject), its own partial BLS signature (if accepted). | Each node has either broadcast a BLS signature share to `iris/consensus/v1` (accept) or broadcast a rejection (reject). |
 | **Voting** | **Leader Node** collects | The **Leader Node** collects BLS signature shares from `iris/consensus/v1`. It tracks: which nodes have responded, the count of accepts vs. rejects, the partial signatures received. | The **Leader Node** has collected $t$ valid signature shares (where $t > 2n/3$), OR the voting timer expires. |
-| **Commit** | **Leader Node** finalizes | The **Leader Node** aggregates $t$ partial BLS signatures into a single 48-byte threshold signature. The **Relayer** module (acting as the trustless transport layer) submits the final report `{request_id, ipfs_cid, aggregated_bls_signature}` to the `IrisVerifier` smart contract on the host blockchain. The round is now finalized. The node tracks: the finalized CID, the aggregated signature, the transaction hash of the on-chain delivery. | The on-chain transaction is confirmed, OR the round is marked as failed (insufficient signatures / timeout). |
+| **Commit** | **Leader Node** finalizes | The **Leader Node** aggregates $t$ partial BLS signatures into a single 48-byte threshold signature. The **Relayer** module (acting as the trustless transport layer) submits the final report `{request_id, ipfs_cid, aggregated_bls_signature}` to the `IrisVerifier` smart contract on the host blockchain. During Phase 1 (§8.1) the Foundation Relayer performs this submission; from Phase 2 on, any reputation-qualified Relayer above the threshold may submit, with timeout-based fallback so a single censoring Relayer cannot stall the round. The round is now finalized. The node tracks: the finalized CID, the aggregated signature, the transaction hash of the on-chain delivery. | The on-chain transaction is confirmed, OR the round is marked as failed (insufficient signatures / timeout). |
 
 #### Round State Data Structure (Conceptual)
 
@@ -351,6 +431,8 @@ The resulting **IPFS CID** now points to the complete package: the visual recons
 Panels are immutable once committed. If the same AoI is requested again at a later time, a new panel is created — it does not overwrite the old one. This creates the **temporal layering** described in the geodesic model.
 
 ### 3.4 Layer 4 — Committee State (network-wide, slow-moving)
+
+> **Trust Model:** This section is the deep-dive for the **Committee (collective)** row in [§1.3 Trust Model](#13-trust-model).
 
 The committee is the set of staked, authorized nodes that participate in consensus. This state changes infrequently — only when operators join, leave, or are slashed.
 
@@ -624,7 +706,7 @@ Iris defines three GossipSub topics, each carrying a specific message type at a 
 | `iris/observations/v1` | `Manifest` | ~500 bytes | All **Regular Nodes** | **Leader Node** | `Observing` |
 | `iris/consensus/v1` | `Proposal` / `BLSShare` / `Rejection` | ~300–800 bytes | **Leader Node** (Proposal) / **Regular Nodes** (BLSShare) | All nodes | `PreCommit → Voting → Commit` |
 
-> **Critical design decision:** Full GeoTIFF payloads (500 MB – 16 GB each) are **never** published to GossipSub. Gossiping a 1 GB file to a 20-node mesh would produce ~20 GB of total network traffic per observation per node. Instead, only lightweight manifests (~500 bytes) are gossiped. The **Leader Node** retrieves full payloads via direct streams (Section 4.5) only when needed.
+> **Critical design decision:** Full GeoTIFF payloads (500 MB – 16 GB each) are **never** published to GossipSub. Gossiping a single 1 GB observation through a 20-node mesh would produce ~20 GB of redundant network traffic per round. Instead, only lightweight manifests (~500 bytes) are gossiped. The **Leader Node** retrieves full payloads via direct streams (Section 4.5) only when needed.
 
 #### Mesh Topology
 
@@ -637,7 +719,7 @@ GossipSub v1.1 maintains a mesh of $D = 6$ peers per topic (configurable via `ir
 | $D_{high}$ (maximum mesh degree) | 12 | Above this, the node PRUNEs excess peers to limit fan-out |
 | $D_{lazy}$ (gossip factor) | 6 | Number of peers to whom the node sends `IHAVE` control messages for messages not directly forwarded |
 | Heartbeat interval | 1 second | How often the node evaluates mesh health and peer scores |
-| Message TTL | 120 seconds | Messages older than this are dropped and not forwarded |
+| Message TTL | 600 seconds | Messages older than this are dropped and not forwarded. Sized to comfortably outlast the Phase 2 manifest deadline (300s, §7.2) so manifests published early in Observing remain forwardable until the Leader transitions to Aggregating, with 2× headroom for clock skew and slow propagation paths |
 
 #### Peer Scoring
 
@@ -822,7 +904,7 @@ mesh_degree_low = 4
 mesh_degree_high = 12
 lazy_degree = 6
 heartbeat_interval_ms = 1000
-message_ttl_seconds = 120
+message_ttl_seconds = 600
 
 [network.kademlia]
 k_bucket_size = 20
@@ -917,6 +999,8 @@ Any node in the network can verify a `.tlsn` proof by performing the following s
 If any step fails, the proof is rejected, the associated payload is discarded, and the contributing node's GossipSub peer score is penalized (see §4.4 — Peer Scoring).
 
 ### 5.5 Trust Assumptions & the Notary
+
+> **Trust Model:** This section is the deep-dive for the **Notary** row in [§1.3 Trust Model](#13-trust-model).
 
 The Notary server is the root of trust in the TLSNotary protocol. Understanding its trust boundary is critical for evaluating Iris's security guarantees.
 
@@ -1058,9 +1142,69 @@ While the heavy computation (fetching, TLS proof generation, tensor comparisons)
 
 * **Iris Verifier Contract**: Deployed on target host chains (e.g., Ethereum, Polygon), this contract is seeded with the network's aggregate public key and the current epoch counter.
 * **Report Delivery**: The Relayer module submits `deliverReport(requestId, ipfsCid, signature)`. The contract recreates the message digest from `requestId` and `ipfsCid`, then verifies the BLS signature against the stored aggregate public key via precompile (EIP-2537) or a Solidity BLS library.
-* **Tokenomics (Staking & Slashing)**: Node operators must stake IRIS tokens to join the active committee. **Requesters** pay request fees that are distributed to honest nodes (those whose similarity scores exceeded the threshold). Nodes providing anomalous data or invalid TLS proofs have their stakes slashed. A portion of the request fee is also allocated to the **Relayer** to cover the gas costs of submitting the on-chain transaction, plus a profit margin to incentivize reliable relaying.
+* **Relayer Eligibility State**: `IrisVerifier` additionally maintains `foundationRelayer` (the Phase 1 allowlist address), `relayerReputationRoot` (a Merkle root of `(staking_address, reputation_score)` committed by the active committee under threshold signature), and `requestSubmissionDeadline[requestId]` (the timeout after which any reputation-qualified address may submit). Access control for `deliverReport` consults these per the phase roadmap in §8.1. The full contract interface — function signatures, events, errors, and gas accounting — is deferred to a dedicated smart-contract specification (review item 2.8).
+* **Tokenomics (Staking & Slashing)**: Node operators must stake IRIS tokens to join the active committee. **Requesters** pay request fees that are distributed to honest nodes (those whose similarity scores exceeded the threshold). Nodes providing anomalous data or invalid TLS proofs have their stakes slashed. A portion of the request fee is also allocated to the **Relayer** to cover the gas costs of submitting the on-chain transaction, plus a profit margin to incentivize reliable relaying. Relayer fees accrue only to the staking address that successfully lands the on-chain `deliverReport` transaction; eligibility for that submission is gated per §8.1.
 * **Requester Callback**: Upon successful verification, the contract calls `targetContract.onIrisDataReceived(requestId, ipfsCid)` via the `IIrisReceiver` interface, injecting the verified panel into the **Requester**'s ecosystem.
 * **Data Distillation**: External networks (like Chainlink DONs) can query the Iris API Gateway to ingest verified GIS data and distill it into simpler numerical attributes for smart contracts.
+
+### 8.1 Relayer Trust Model & Phase Roadmap
+
+> **Trust Model:** This section is the deep-dive for the **Relayer** row in [§1.3 Trust Model](#13-trust-model).
+
+The Relayer's safety properties are established by cryptography (§1.2) — no Relayer can forge a valid threshold signature or alter a finalized payload. The Relayer's **liveness** properties, however, depend on at least one honest Relayer being willing to transport messages. A single Relayer that refuses to relay can censor specific requests, stall the network, or front-run competing Relayers for fee revenue. This subsection defines what a malicious Relayer can and cannot do, the reputation-based mitigation, and the phased decentralization of the role.
+
+#### What a malicious Relayer *can* do
+
+* **Censor by silent drop**: Refuse to forward `DataRequest` events from the host chain to GossipSub, or refuse to submit finalized reports back on-chain. The network has no on-chain proof of refusal — only the absence of a relay.
+* **Front-run fee collection**: When multiple Relayers compete (Phase 2+), a Relayer with lower latency or a higher gas tip can win the on-chain submission race for every request, depriving competitors of revenue without violating any protocol rule.
+* **Equivocate by submitting malformed payloads**: Attempt to submit reports with stale or invalid CIDs. These are rejected by the `IrisVerifier` signature check (the aggregated BLS signature commits to the exact `(request_id, ipfs_cid)` pair), but each rejection still consumes gas and can be used to grief the relaying address.
+
+#### What a malicious Relayer *cannot* do
+
+* **Forge consensus**: Without $t$-of-$n$ BLS share access, a Relayer cannot construct a valid threshold signature. Any submitted report not signed by a real committee quorum fails at the precompile.
+* **Alter the CID or signature payload**: The aggregated signature commits to the exact `(request_id, ipfs_cid)` pair. Substituting a different CID invalidates the signature.
+* **Fabricate a `DataRequest`**: Requests are sourced from on-chain event logs, not from Relayer claims. A Relayer cannot inject a phantom request — committee members would not observe it on-chain when cross-checking.
+
+#### Mitigation: Reputation-Gated Opt-In Role
+
+The Relayer is structured as an **opt-in sub-role** atop a regular Iris node, identified at the network layer by `PeerId` but **gated economically by the operator's on-chain staking address**. Eligibility requires the staking address to hold a reputation score above a governance-tunable threshold. The threshold is set high enough that the time, stake-time, and compute required to accumulate it represent a serious opportunity cost — grinding to the threshold purely to censor forfeits months of relay-fee revenue and risks slashing of the underlying stake. Reputation is bound to the staking address (not just the `PeerId`) precisely so that selling the libp2p keypair does not transfer reputation: an attacker would have to acquire the underlying stake too, restoring the opportunity-cost argument. Multiple eligible Relayers compete naturally; the on-chain timeout fallback (below) ensures a single censor cannot stall the network.
+
+#### Reputation Inputs (Intent, not Formula)
+
+Reputation is computed off-chain by every committee member from observable round events. Inputs include:
+
+* **Stake-time** — committed stake × time as an active committee member.
+* **Successful round contributions** — each round in which the node delivered a Phase 1 `TlsCommitment`, a Phase 2 `Manifest`, and a valid BLSShare attested by the Leader.
+* **DKG participations** — successful contributions to committee DKG ceremonies (per §3.4).
+* **Uptime** — sustained mesh presence and responsiveness to gossip.
+
+Penalties and decay:
+
+* **Slashing events** — any slashable offense (invalid TLS proof, anomalous data, attributable DKG misbehavior per `threat_model.md`) zeros or sharply reduces reputation alongside the stake slash.
+* **Missed rounds** — failure to deliver expected Phase 1 / Phase 2 messages applies a smaller decrement.
+* **Decay** — reputation decays over inactive periods, preventing perpetual eligibility from a single past run of activity.
+
+Concrete weights, decay constants, and the eligibility threshold value live in a separate tokenomics/governance document and are governance-tunable per epoch. The architecture spec fixes the inputs and intent, not the parameterization.
+
+#### Reputation Commitment Mechanism
+
+Because reputation is derived from observable round events, every honest committee member arrives at the same score for every staking address. The active committee periodically commits a Merkle root of `(staking_address, reputation_score)` tuples to `IrisVerifier` via the existing $t$-of-$n$ BLS threshold signature, at a cadence aligned with epoch boundaries (§3.4). Relayers submit Merkle proofs alongside `deliverReport` calls so the contract can verify eligibility cheaply. This reuses the committee-signed root-of-trust pattern already established for finalized panels — no new cryptography, no new trust assumption beyond what the contract already places in the committee aggregate key.
+
+#### Censorship Fallback Mechanism
+
+`IrisVerifier` tracks `requestSubmissionDeadline[requestId] = blockTimestamp(DataRequest) + T1`, with `T1 ≈ 600s` (twice the Phase 2 manifest deadline of 300s, providing headroom for normalization, voting, and on-chain finality). Before the deadline, the access-control rule for `deliverReport` matches the current phase (see roadmap below). After the deadline, any address proving reputation above the threshold via Merkle proof against the latest committed root may submit — regardless of phase, and regardless of whether the originally-expected Relayer is still online. This is the core anti-censorship guarantee: a single non-relaying Relayer cannot indefinitely stall a request, because any reputable peer can step in and collect the relay fee instead.
+
+#### Relayer Trust Model — Phase Roadmap
+
+The Relayer role is a known bootstrapping compromise on the *liveness* axis only — safety is fully decentralized from day one across all phases. Iris addresses the liveness gap through a three-phase progression:
+
+| Phase | Operator | Status | Description |
+|-------|----------|--------|-------------|
+| **Phase 1 — Foundation Relayer** | Iris Foundation | **MVP** | The Iris Foundation operates the sole Relayer. The on-chain `deliverReport` allowlist contains only the Foundation's address. The Foundation commits to a multi-region deployment with a published uptime SLA, but liveness is still concentrated in a single organization. The on-chain timeout fallback is disabled (or set to a very long window) during this phase because no eligible reputation set yet exists — this phase is honestly framed as a liveness compromise, not a solution |
+| **Phase 2 — Foundation + Reputable Opt-In Relayers** | Iris Foundation + reputation-qualified node operators | Planned | The on-chain access rule for `deliverReport` accepts (a) the Foundation's address, or (b) any address with a valid Merkle proof of reputation above the threshold against the latest committed root. Multiple Relayers compete; the timeout fallback activates so any reputable Relayer can pick up a censored request after `T1`. The Foundation Relayer remains as a guaranteed-available fallback while the reputation set grows large enough to be censorship-resistant on its own |
+| **Phase 3 — Permissionless Reputation-Gated** | Any node operator above the reputation threshold | Future | The Foundation steps away from its privileged position. `deliverReport` becomes purely permissionless above the reputation threshold; the Foundation address has no on-chain status beyond what its own reputation score earns. The role is fully decentralized, gated only by accumulated honest behavior and the underlying stake |
+
+> **Bottom Line:** In the MVP, the Relayer is the Iris Foundation. This concentrates *liveness* — not safety — on a single operator, mitigated by a multi-region deployment and an uptime SLA. The roadmap progressively transfers Relayer eligibility from the Foundation → reputable opt-in operators above a reputation threshold → a fully permissionless reputation-gated pool. Across all three phases, **safety is unchanged**: no Relayer can forge a threshold signature, alter a payload, or fabricate an on-chain request at any phase.
 
 ---
 

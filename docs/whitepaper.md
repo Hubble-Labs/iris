@@ -1,132 +1,158 @@
-Goal: Define the high-level vision and goals of the protocol. What is broken in the world that Iris fixes.
-
-Key Sections:
-- Introduction: What is Iris and why does it matter?
-- Problem Statement: What is broken in the world that Iris fixes?
-- Solution: How does Iris fix it?
-- Vision: What is the long-term vision for Iris?
-
-
 # Iris Whitepaper
+
+**Version 0.2 — May 2026 — Pre-launch design draft**
 _By Salvador Salcedo_
 
-## Introduction
-Iris is a Decentralized Terrestrial Satellite Oracle Network or DtsON. It will serve as the network that exists through the communication between the nodes working together to determine the provenance of the requested satellite imagery. Like current oracle networks, such as those built on Chainlink, Iris will allow developers to create new decentralized applications, or dapps, that were impractical or impossible before.  
+> **Status:** Pre-launch design draft. The technical architecture this document summarizes is fully specified in [`architecture.md`](./architecture.md); the adversarial assumptions are catalogued in [`threat_model.md`](./threat_model.md). Where this whitepaper and those documents diverge, the technical documents are authoritative.
 
+## Abstract
 
-### Problem Statement
-Iris was born out of the desire to combine space and blockchain technologies together in a single solution or product. Cryptocurrency markets and DeFi as a whole are global markets where the action never stops. Assets like Bitcoin and Ethereum exist in extremely lively environments. Their prices have changed rapidly in the past and changes can typically be measured in seconds. For everyday people to interact with others through dapps, those services need to agree on what the prices of the said assets are. Oracles and the networks they comprise act to produce accurate external, real-world data for blockspace-bound smart contract logic. However, the applications of oracle networks extend far beyond the accurate reporting of Bitcoin prices. Iris aims to be the first project to extend oracle functionality beyond the use of single numerical values
+Iris is a decentralized oracle network for satellite imagery. Smart contracts on existing blockchains can request a verified picture of any bounded patch of Earth at a chosen point in time and receive, in return, a BLS-threshold-signed reference to a satellite image whose authenticity is provable end-to-end. Iris combines TLSNotary attestations of each node's commercial imagery fetch with a BFT consensus over the medoid of independently-fetched images — yielding a single, original satellite image whose provenance can be checked by any third party. The protocol is the first oracle network to apply BFT consensus to satellite imagery in this way, opening a class of decentralized applications — verifiable carbon-sequestration accounting, parametric crop insurance, ground-truth dispute resolution — that today depend on trusted intermediaries.
 
+## 1. Introduction
 
-Of course oracles aren’t new. Chainlink is the largest oracle network project and has arguably contributed the most to the development of oracle networks. As of May 2022, the TVL of projects that depend on the Chainlink network’s successful operation or Total Value Secured (TVS) is $38.3bn. That is 52% of all the value secured by oracle networks. It is no surprise then, that their oracle networks have allowed web3’s most popular defi applications to maintain accurate price data for years now.
+Iris secures and verifies the provenance of satellite imagery for smart contracts. Through a stake-gated committee of nodes operating under a Byzantine Fault Tolerant (BFT) consensus protocol, Iris turns commercial satellite imagery — purchased from existing providers like Maxar, Planet, and BlackSky — into a cryptographically verifiable input for on-chain logic. Much like Chainlink made price feeds reliable enough for decentralized finance, Iris aims to make geospatial data reliable enough to be the foundation of a new class of decentralized applications.
 
+Iris is infrastructure. End users never interact with it directly; the protocol's consumers are smart contracts and the Decentralized Oracle Networks (DONs) built on top of them. The technical novelty is not the consensus primitive — Iris uses standard BLS threshold signatures over an Iris-specific BFT round — but the *application* of consensus to imagery. Nodes independently fetch the same scene from different providers, the network selects the medoid as canonical, and the result carries individual TLS proofs of provenance along with a committee threshold signature.
 
-They do so by creating and distributing software, known as a Chainlink Client, which runs on a user's computer and turns it into a Node. Nodes are the computers that comprise oracle networks and perform the computations required to report accurate data back to dapps and smart contracts. Dapps and their services are part of the DeFi world that never sleeps because their openness makes their use constant and ubiquitous. While they have developed ways for committees of nodes, or oracle networks, to reach consensus on the value of a single asset, they have yet to produce a way to do so for images. 
+## 2. Problem Statement
 
+Oracle networks exist because smart contracts cannot reach off-chain data on their own. Chainlink and its peers have demonstrated, at substantial scale, that decentralized committees can agree on numerical values like asset prices reliably enough for billions of dollars of value to depend on the result. The technique works because numerical values are small, easy to compare, and have well-defined notions of agreement (median, time-weighted average, and similar).
 
-### Solution
-Satellites, for reasons we will discuss shortly, are a great source for imagery data to use in decentralized applications. Therefore, satellite imagery is a good data-type for oracle networks to verify the provenance of. One of the biggest reasons for doing so is that the infrastructure to request satellite imagery, as long as you’re willing to wait a day or two, already exists from companies like Maxar, Planet and BlackSky. Of course these services aren’t free. Thankfully, the nodes in an oracle network are paid for participating and it is assumed that the node’s reward will cover the service fee. Another advantage is that all satellites inherently have a similar view of the target area. With the correct post-processing, it would be easy for nodes to produce similar images thereby making it easier to detect similarity or lack thereof. 
+Imagery has none of these properties. A satellite image is tens of megabytes to tens of gigabytes; two images of the same scene from different satellites are never byte-identical; there is no obvious "median" of an image. As a result, no oracle network has previously delivered satellite imagery with the kind of cryptographic provenance and Byzantine-fault-tolerant agreement that on-chain consumers require. This gap blocks an entire class of applications — anything where a smart contract's behavior should depend on what a place on Earth actually looks like.
 
+## 3. Solution
 
-A DtsON as described above would create receipts in the form of hashes of what a part of the Earth looked like at a certain time. A blockchain in this case would serve as the database where the hashes will be publicly stored as long as the blockchain exists. 
+Iris fills this gap with a five-part design. Each part is summarized below; the full technical specification is in [`architecture.md`](./architecture.md), with the section anchors noted in each subsection.
 
+### 3.1 Geodesic Reconstruction
 
-A DtsON like Iris, and the photos it processes, will allow developers to build other Decentralized Oracle Networks or DONs, to distill information from the images and ultimately send simpler data for Smart Contracts (SCs) to react to. This paradigm of chaining DONs, like Iris, together to simplify real world data into actionable data points, like price data, could be the way future Decentralized Applications (dapps) are built. Iris will be the first solution to use a Byzantine Fault Tolerant (BFT) consensus mechanism to verify the similarity and therefore validity or provenance, of satellite imagery.
+A consensus round reconstructs a single **panel** — a bounded Area of Interest (AoI) at a single timestamp. The Earth is treated as a notional geodesic mosaic, with each AoI as a discrete facet that can be independently requested, verified, and stored. Resolution is demand-driven: panels are reconstructed only where Requesters request them ([`architecture.md` §2](./architecture.md#2-the-geodesic-reconstruction-model)).
 
-### Vision
-Applications & Future
+### 3.2 Committee, Leader, and Medoid Selection
 
+Iris is operated by a stake-gated **Committee** of Regular Nodes. For each round, a **Leader** is deterministically elected by stake-weighted Keccak-256 hash of the request ID and host-chain block hash. Each Regular Node independently fetches the panel from a commercial Data Provider; the Leader collects the resulting manifests, computes pairwise similarity over the normalized images, and selects the **medoid** — the single existing image most similar to all others — as the canonical reconstruction. Critically, the medoid is an *original, unaltered image* fetched by one of the nodes, not a synthetic average; this preserves the per-node TLS proof end-to-end ([`architecture.md` §3](./architecture.md#3-state-machine-architecture), [§6.4](./architecture.md#64-average-scenario-medoid-selection), [§7](./architecture.md#7-consensus-engine-iris-bft)).
 
-Iris is an infrastructure protocol. Thus the end user is never meant to see or interact with it. The technology behind Iris is nothing new. Blockchain, machine learning, image comparison algorithms and the other technologies behind Iris already exist, they just haven’t been combined together in this way before. Because oracle networks and the ways applications depend on them might not be well know by the average reader, I have listed some of my favorite dapp ideas one can build on top of Iris. 
+### 3.3 Provenance via TLSNotary
 
+Each Regular Node's fetch is attested by a TLSNotary proof: a two-party MPC between the node (Prover) and a Notary that produces a third-party-verifiable transcript of the TLS session with the Data Provider. The Notary never sees plaintext; it only co-signs that the session occurred. The resulting `.tlsn` proof is what binds a specific image hash to a specific commercial source ([`architecture.md` §5](./architecture.md#5-data-provenance--ingestion)).
 
-Kokiri: Voluntary Carbon-Sequestering Asset Tokenization and Market
+### 3.4 BFT Consensus via BLS Threshold Signing
 
-1. The Situation 
-It is no secret that the Earth is warming up due to the over-accumulation of greenhouse gasses in the atmosphere. For years now activists have been sounding the alarm on the dangers of global warming. One of the things to come out of our new awareness and effort to slow, or optimistically reverse, the warming of the earth are carbon credits. 
+Once the Leader proposes a medoid, every Regular Node independently re-runs the similarity check against its own local fetch and, on agreement, contributes a BLS signature share. A `t > ⌊2n/3⌋` threshold of shares aggregates into a single 48-byte BLS signature over `(request_id, ipfs_cid)`. The threshold key is established by a Distributed Key Generation (DKG) ceremony at every committee rotation, not per-request ([`architecture.md` §7.5](./architecture.md#75-threshold-cryptography)).
 
-One carbon credit represents one 1 ton of CO2 removed from the atmosphere. They are created when an individual’s or organization’s project reduces, avoids, destroys or captures carbon. Typically, mostly companies but individuals also buy carbon credits to offset their own emissions. There exist two types of carbon credit markets: voluntary and involuntary.
+### 3.5 Settlement via the Relayer
 
+The proposal, once threshold-signed, is delivered on-chain to the `IrisVerifier` contract by a **Relayer** — a transport role that bridges the Iris network and the host blockchain. The Relayer holds no BLS shares and cannot forge consensus; its role is liveness, not safety. The host-chain contract verifies the BLS signature against the committee's aggregate public key (via the EIP-2537 precompile where available, or a Solidity BLS library otherwise) and emits the panel's IPFS CID for the Requester to consume ([`architecture.md` §8](./architecture.md#8-smart-contract-integration)).
 
-The voluntary carbon credits are bought by people or organizations that want to reduce their carbon footprint for any number of reasons. Certain industries, especially heavy polluters, have restrictions on how much carbon they can emit over a year. These companies are therefore forced to either reduce their carbon emissions or buy carbon credits to offset what they released. Carbon credits bought under the ¿previous circumstance are known as involuntary carbon credits.
+The end result, from the Requester's perspective, is an on-chain reference to an unmodified, originally-fetched satellite image carrying an end-to-end chain of cryptographic provenance: TLS-attested at ingest, medoid-selected by deterministic normalization, and threshold-signed by the Iris committee.
 
+## 4. Trust Model
 
-2. The Problem 
-While the carbon credit markets have continued to grow as we realize the error of our ways, its current incarnation is far from perfect.
+Iris is BFT, not trustless. The protocol's safety and liveness rest on a small set of explicit assumptions; this section names them so that a reader can evaluate the security claim. The companion document [`threat_model.md`](./threat_model.md) catalogs the attacks against each assumption and the corresponding mitigations.
 
+### 4.1 Committee — Honest Majority
 
-First, there is no way for the entity buying carbon credits to verify that each ton of CO2 the credits represent was actually removed from the atmosphere. Therefore the issuing of carbon credits by individuals, organizations and governments is susceptible to fraud through every pair of hands the credits passed through before reaching the buyer. 
+Iris assumes fewer than `n/3` of the active committee is malicious at any time. If this assumption holds, the BLS threshold signature is a reliable witness of committee consensus. If it is violated, a coordinated `≥ n/3` adversary can forge threshold signatures or stall the network — a failure mode shared with all BFT systems. Stake-weighted admission, per-operator caps, and epoch-based rotation reduce the probability of violation but do not eliminate it ([`threat_model.md` §3.5](./threat_model.md#35-bft-threshold-violation-f-geq-n3)).
 
+### 4.2 Notary — Phased Decentralization
 
-Another issue is that the current carbon credit markets are difficult to access and assess. Different markets across different countries have very different prices for their carbon credits. If the current system was truly open and available to everyone then there wouldn’t be such large differences in price due to the arbitrage opportunities the difference creates. If an individual wants to buy a carbon credit, they don’t go to an exchange like you do for stocks and crypto. One has to trust the organizations creating and selling the carbon credits are being honest. 
+The TLSNotary proof requires a Notary that does not collude with the Prover. Iris addresses this in four phases:
 
+- **Phase 1 (MVP):** TLSNotary's hosted PSE/EF Notary — open-source, non-profit, third-party — with a whitelist of approved keys enforced on-chain.
+- **Phase 2:** Iris-Foundation-operated Notary fleet, with per-round Notary diversity (no two nodes in a round use the same Notary).
+- **Phase 3:** Permissionless staked Notary pool with slashing for provable misbehavior.
+- **Phase 4 (research):** k-of-m threshold MPC notarization, eliminating single-Notary collusion entirely.
 
-Finally, it is difficult for people to create carbon credits on their own. Today, if someone wants to create and sell carbon credits based on a personal carbon reduction project, they have to reach out to an organization that buys it off of them. 
+A single colluding `(Prover, Notary)` pair is absorbed by the BFT threshold; the residual risk is `≥ n/3` Provers all colluding with the same Notary, which is the explicit motivation for the phase roadmap ([`architecture.md` §5.5](./architecture.md#55-trust-assumptions--the-notary), [`threat_model.md` §2.1](./threat_model.md#21-notary-collusion-with-prover)).
 
+### 4.3 Relayer — Liveness, Not Safety
 
+A Relayer cannot forge consensus — it lacks the threshold BLS shares. It can, however, censor by silent drop: refusing to forward a `DataRequest` event or withholding a finalized report. Iris addresses this in three phases:
 
+- **Phase 1 (MVP):** Iris Foundation operates the sole Relayer; on-chain allowlist of one. This is honestly framed as a liveness compromise, not a solution.
+- **Phase 2:** Reputation-gated opt-in Relayers compete with the Foundation; an on-chain timeout (`requestSubmissionDeadline`, ~600s) lets any reputation-qualified address step in if the primary stalls.
+- **Phase 3:** Foundation steps away; the role becomes permissionless above the reputation threshold.
 
-3. The Solution 
+Across all phases, **safety is unchanged** — only liveness varies ([`architecture.md` §8.1](./architecture.md#81-relayer-trust-model--phase-roadmap), [`threat_model.md` §4.1](./threat_model.md#41-relayer-censorship)).
 
+### 4.4 Host Chain
 
-With Iris, developers could use the imagery provided by the DtsON to extract information on forestry and agricultural efforts to capture carbon and therefore mint tokens representing those assets.
+Iris assumes the host blockchain (Ethereum, Polygon, or other EVM-compatible chain) provides standard finality guarantees and that the EIP-2537 BLS precompile is available — or that a Solidity fallback is acceptable on chains where it is not. Catastrophic host-chain reorgs deeper than the configured `k`-confirmation wait are out of scope ([`threat_model.md` §4.2](./threat_model.md#42-host-chain-reorg)).
 
+## 5. Reference Applications
 
-Developers could build a user-facing dapp, that requires 4 pairs of coordinates detailing the Area of Interest (AoI), the type of vegetation grown, verification that they own the AoI and the gas required for the dapp. Once a user submits the information required, their request will be sent from the dapp to Iris. Iris nodes then fetch and decide which image is closest to all the others and sends it back to the dapp. The dapp would then use their own OCRM DON where the nodes run a data science or machine learning model off-chain to distill a figure, such as vegetation percentage, from the image returned by Iris. Once the aggregate value is decided and the aggregation round ends their DON then send the aggregate to the dapp’s smart contract. The dapps smart contract then uses this numerical data to decide what action to take. In this scenario, the contract has to decide how many tokens representing carbon sequestering assets to mint. 
+The following are example dapps that *consumers* of Iris could build. They are not part of Iris itself: per [`architecture.md` §1.4](./architecture.md#14-non-goals--scope-boundaries), Iris does not interpret pixel content, broker data-provider subscriptions, or solve application-layer ownership-verification problems. The applications below describe what becomes possible once those layers are built on top of a verified Iris panel.
 
+### 5.1 Carbon-Sequestering Asset Tokenization (Kokiri)
 
-A solution such as the one described above would not only get rid of the fraud and inaccessibility of the current carbon credit market but create an entirely new global decentralized market. 
+The voluntary carbon-credit market is opaque. A buyer cannot easily verify that a credit's underlying ton of CO₂ was actually sequestered, prices vary widely across jurisdictions, and individuals find it impractical to issue credits for personal sequestration projects.
 
+Iris enables a different design. A user-facing dapp would accept an Area of Interest, the type of vegetation grown, evidence of land ownership, and a fee, then issue a `DataRequest` to Iris. Iris returns a verified panel of the AoI; a downstream application-specific DON (operated separately) extracts a vegetation-coverage metric from the image and writes the result to the dapp's smart contract, which mints carbon-sequestration tokens proportional to the result.
 
+> **Open problem:** Land-ownership verification is not solved by Iris. Whether a Requester actually owns the AoI they claim is an application-layer question that requires additional infrastructure — cadastral records, custom hardware, ground-truth photography, or other approaches. Three endogenous and three exogenous solutions are sketched in [`threat_model.md` Appendix A](./threat_model.md#appendix-a--application-layer-open-questions-out-of-scope-for-protocol-threats), but none is committed; this is an open research area for downstream dapp builders.
 
+### 5.2 Parametric Crop Insurance
 
+Crop insurance is unevenly distributed. Farmers in developed countries can typically access it, while smallholders in developing countries often cannot — premiums are too high, the geography is uncovered, or the actuarial work is unprofitable for traditional insurers.
 
+A parametric insurance dapp on Iris could let any farmer with internet access buy a policy by submitting an AoI, ownership evidence, the crop type, and the premium. Each month, the dapp requests an Iris panel of the AoI; an application-specific DON extracts a soil-moisture or vegetation-health metric and writes it on-chain. If a claim is filed, the contract evaluates the metric history against the policy terms and pays out automatically.
 
-Global Crop Insurance
+> **Open problem:** The same land-ownership dependency as §5.1 applies. Without verifiable ownership, a parametric policy can be claimed against arbitrary coordinates.
 
+## 6. Vision
 
-1. The Situation
+Iris is one layer of a stack. Above it sit application-specific DONs that distill verified panels into actionable scalar data; above those sit dapps that turn the scalars into on-chain economic actions. This pattern — chained DONs that progressively reduce real-world signal into smart-contract-consumable inputs — is, in the authors' view, the shape of how decentralized applications will increasingly interact with the physical world.
 
+In the near term, Iris focuses on launching a stake-gated MVP committee on a single host chain, demonstrating the end-to-end Chain of Provenance for a small set of commercial Data Providers, and onboarding reference dapps that exercise the request-response model. Over time, the trust roadmaps in §4 progressively decentralize the Notary and Relayer roles, the committee grows, and host-chain coverage expands.
 
-Since the dawn of civilization, humanity has had to deal with poor weather causing poor harvests. Through our history we have devised ways to counter poor harvests through communal grain storage, trade and finally crop insurance. 
+## 7. Adjacent Initiative: Imaging Cubesats
 
+> **Scope note:** This section describes a **separate organizational initiative** — not part of the Iris protocol MVP and not a precondition for Iris to function. Iris's MVP relies on existing commercial Data Providers (Maxar, Planet, BlackSky, Sentinel) for imagery.
 
-2. The Problem
+A medium-term constraint on Iris is the accessibility of satellite imagery itself. Commercial provider APIs are gated, expensive, and individually rate-limited. A complementary initiative — a separate legal entity associated with the Iris team — proposes to design and launch compact imaging cubesats whose imagery is sold to Iris node operators on open terms. Cubesats are inexpensive by space-industry standards (low single-digit thousands of dollars per unit), and rideshare launches keep orbital costs accessible.
 
+A second goal of this initiative is to publish reference designs that allow other organizations — commercial businesses, DAOs, research groups — to build and operate their own imaging cubesats. A diverse pool of independently-operated imagery sources strengthens the decentralization properties of any DON that consumes them, including Iris.
 
-Farmers in most developed countries today can buy crop insurance from organizations that offer those services. However, many farmers in developing countries do not have access to crop insurance for one reason or another. Often farmers can’t afford the insurance, live in areas not covered by any companies or the crop insurance companies won’t serve them since it wouldn’t be profitable enough to do so. 
-
-
-With the majority of the world’s farmers being among the poorest people in the world, a solution to the current issues with crop insurance would go a long way in helping the hands that feed us.
-
-
-3. The Solution
-
-
-With Iris, developers can create a dapp where farmers can sign up for crop insurance using 4 coordinate points representing the AoI, proof they own AoI, what type of crop they’re crowing, the premium and claim amount and the gas required. Assuming the user pays their premium on time, every monththe dapp can request Iris to acquire an image of the AoI. Once Iris sends back the image of the AoI, the dapp devs feed it to an application specific DON that determines the moisture in the ground and sends it to the dapp’s smart contract. 
-
-
-If the farmer submits a claim, the smart contract will go through the data fed it by the application specific DON and determine whether or not to payout.
-Because it is a dapp, anyone with an internet connection and enough money to pay for gas and the premiums would be able to take out a crop insurance policy and receive a payout in the event of poor harvest.
-
-
-Research Lab and Distributed Constellations
-
-
-An active barrier to the successful implementation of Iris is the accessibility of satellite imagery. Though it is true that some companies sell satellite imagery as a service, access to these services is relatively limited to individuals. Therefore in the spirit of decentralization and accessibility, the Iris team's legal entity/company will also create and launch compact imagery satellites with the intent of selling the imagery collected by them to Iris node operators. Thankfully, cubesats can be made for as little as a couple thousand dollars. Launches for cubesats on rideshare missions also offer competitive pricing for launching small cubesats. Such endeavors would easily be within the reach of an organization like Chainlink with their millions of dollars in funding from their LINK tokens and business dealings.
-
-
-Another goal of this future project will be to provide the resources necessary for other organizations, such as traditional business or DAOs, to build and launch their own imaging cubesats. Having multiple open image data services will be instrumental in securing the decentralization of Iris and will prove higher levels of confidence in our DON's data sources.
-
-
-
+This work is independent of the Iris protocol roadmap. Iris ships and operates without it.
 
 ## Glossary
 
-* Actionable Data: Describes real-world data that a smart contract can ingest and use to carry out decisions in a computationally efficient way.
-* Byzantine Fault Tolerant: A description assigned to a consensus mechanism designed to guarantee the authenticity of communications between honest and potentially adversarial participants. 
-* Cubesat: A class of miniaturized satellite based around a form factor consisting of 10 cm cubes.
-* Decentralized Applications: Web applications that users access through the internet that rely on smart contracts and underlying blockchain technology to execute an economic transaction or function.
-* Node: A computer that runs specialized software meant only to request and send data from a real-world data-source.
-* Oracle: A node/computer that participates in providing data to a larger set of nodes known as an oracle network.
-* Provenance: The origin of data and the process by which it arrived at the database.
+* **Actionable Data:** Real-world data that a smart contract can ingest and use to carry out decisions in a computationally efficient way.
+* **AoI (Area of Interest):** A bounded patch of Earth's surface, defined by a bounding box and timestamp, that constitutes the subject of one Iris consensus round.
+* **Average Scenario:** The image selected by the medoid procedure as the canonical reconstruction for a panel. Synonymous with "the medoid image" in Iris terminology.
+* **BFT (Byzantine Fault Tolerant):** A property of a consensus mechanism that guarantees agreement among honest participants in the presence of arbitrary malicious behavior, up to some bounded fraction (in Iris, fewer than `n/3` of the committee).
+* **BLS (Boneh–Lynn–Shacham):** A signature scheme on the BLS12-381 curve that supports threshold signing and aggregation. Iris uses BLS for its committee threshold signature.
+* **Committee:** The set of staked Regular Nodes participating in Iris consensus during a given epoch.
+* **Cubesat:** A class of miniaturized satellite based around a 10 cm cube form factor.
+* **Dapp (Decentralized Application):** A web application whose backend execution depends on smart contracts and the underlying blockchain rather than a centralized server.
+* **Data Provider:** A commercial satellite imagery service (Maxar, Planet, BlackSky, Sentinel) that Iris nodes fetch from. Not part of the Iris network.
+* **DKG (Distributed Key Generation):** The cryptographic ceremony by which the committee jointly generates the BLS aggregate public key and individual private shares without any party seeing the full private key.
+* **DON (Decentralized Oracle Network):** A committee of nodes that delivers off-chain data to smart contracts. Iris is a DON specialized for satellite imagery.
+* **GeoTIFF:** A geospatial raster format used for satellite imagery; the on-the-wire payload that nodes fetch from Data Providers.
+* **IPFS (InterPlanetary File System):** Content-addressed storage. Iris pins finalized panel imagery to IPFS and writes the resulting CID on-chain.
+* **Leader:** The Regular Node deterministically elected to aggregate manifests, run the normalization pipeline, and propose the medoid for a given round.
+* **Manifest:** A signed message published by a Regular Node containing the BLAKE2b hash of its fetched image, AoI metadata, and a reference to its TLSNotary proof.
+* **Medoid:** The single, existing data point most similar to all others in a set. Iris uses the medoid (rather than a synthetic average) to preserve cryptographic provenance.
+* **Node:** A computer that runs Iris software and participates in the network.
+* **Notary:** The third party that co-signs TLS session transcripts in the TLSNotary protocol, enabling third-party verification of a node's commercial fetch.
+* **OCRM (Off-Chain Reporting Model):** A pattern in which a DON aggregates and signs values off-chain before submitting a single result on-chain. Iris's BLS threshold signature is an OCRM-style commitment.
+* **Oracle:** A node that participates in providing off-chain data to a DON.
+* **Panel:** A single AoI-and-timestamp pair, finalized by one Iris consensus round; the unit of geodesic reconstruction.
+* **Provenance:** The traceable origin of data and the verifiable record of its journey from source to consumer.
+* **Regular Node:** A staked committee member that fetches imagery, generates TLSNotary proofs, and contributes BLS shares to consensus.
+* **Relayer:** A transport role that bridges the host blockchain and the Iris network, forwarding `DataRequest` events inbound and finalized reports outbound.
+* **Requester:** A dapp or smart contract that initiates an Iris round by paying a fee and submitting an on-chain request.
+* **Smart Contract (SC):** Code deployed on a blockchain that executes deterministically in response to transactions.
+* **TLSNotary:** A cryptographic protocol that uses two-party MPC to produce a third-party-verifiable proof of a TLS session's contents without giving the Notary access to plaintext.
+
+## References
+
+* Iris Architecture Specification — [`docs/architecture.md`](./architecture.md). Full technical specification of the protocol, including state machine, network layer, consensus, and contract integration.
+* Iris Threat Model — [`docs/threat_model.md`](./threat_model.md). Per-layer attack catalog, mitigations, and slashing rules.
+* Iris Architecture Review — [`docs/architecture_review.md`](./architecture_review.md). Open issues and design decisions tracked against the architecture spec.
+* Iris Data Normalization Specification — [`docs/data_normalization.md`](./data_normalization.md). Mathematical formulation of the similarity metrics and medoid selection.
+* TLSNotary — https://tlsnotary.org. Reference implementation and protocol documentation for the MPC-based TLS attestation scheme used by Iris.
+* EIP-2537: Precompile for BLS12-381 curve operations — https://eips.ethereum.org/EIPS/eip-2537. The Ethereum precompile that Iris uses for on-chain BLS signature verification, with a Solidity fallback on chains lacking the precompile.
+* Chainlink — https://chain.link. Reference oracle network whose architecture for numerical data feeds inspired the design of Iris for imagery.
+* Commercial satellite Data Providers referenced in this document: Maxar (https://www.maxar.com), Planet Labs (https://www.planet.com), BlackSky (https://www.blacksky.com), Sentinel/Copernicus (https://www.copernicus.eu).
